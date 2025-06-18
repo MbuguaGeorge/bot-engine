@@ -1,7 +1,11 @@
 from rest_framework import serializers
 from .models import Bot
+from flows.models import Flow
 
 class BotSerializer(serializers.ModelSerializer):
+    flows = serializers.SerializerMethodField()
+    activeFlow = serializers.SerializerMethodField()
+
     class Meta:
         model = Bot
         fields = [
@@ -12,9 +16,28 @@ class BotSerializer(serializers.ModelSerializer):
             'flow_data',
             'whatsapp_connected',
             'created_at',
-            'last_updated'
+            'last_updated',
+            'flows',
+            'activeFlow',
         ]
         read_only_fields = ['id', 'created_at', 'last_updated']
+
+    def get_flows(self, obj):
+        return [
+            {
+                'id': str(flow.id),
+                'name': flow.name,
+                'status': flow.status,
+                'is_active': flow.is_active,
+            }
+            for flow in obj.flows.all().order_by('-updated_at')
+        ]
+
+    def get_activeFlow(self, obj):
+        flow = obj.flows.filter(is_active=True).first()
+        if flow:
+            return {'id': str(flow.id), 'name': flow.name}
+        return None
 
     def validate_name(self, value):
         user = self.context['request'].user
@@ -49,4 +72,24 @@ class BotSerializer(serializers.ModelSerializer):
 
 class BotDetailSerializer(BotSerializer):
     class Meta(BotSerializer.Meta):
-        fields = BotSerializer.Meta.fields + ['flow_data'] 
+        fields = BotSerializer.Meta.fields
+
+    def get_flows(self, obj):
+        return [
+            {
+                'id': str(flow.id),
+                'name': flow.name,
+                'status': flow.status,
+                'is_active': flow.is_active,
+            }
+            for flow in obj.flows.all().order_by('-updated_at')
+        ]
+
+    def get_activeFlow(self, obj):
+        flow = obj.flows.filter(is_active=True).first()
+        if flow:
+            return {'id': str(flow.id), 'name': flow.name}
+        return None 
+    
+
+# I need to create a function that parses the field flow data and extracts the important details..for example, we need to know the start node and the next node, data for each node, 
