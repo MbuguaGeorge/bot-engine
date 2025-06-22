@@ -10,7 +10,7 @@ app_name = 'bots'
 
 urlpatterns = [
     path('bots/', BotListCreateView.as_view(), name='bot-list'),
-    path('<int:pk>/', BotDetailView.as_view(), name='bot-detail'),
-    path('<int:pk>/duplicate/', BotDuplicateView.as_view(), name='bot-duplicate'),
-    path('<int:pk>/toggle-whatsapp/', BotWhatsAppToggleView.as_view(), name='bot-toggle-whatsapp'),
+    path('bots/<int:pk>/', BotDetailView.as_view(), name='bot-detail'),
+    path('bots/<int:pk>/duplicate/', BotDuplicateView.as_view(), name='bot-duplicate'),
+    path('bots/<int:pk>/toggle-whatsapp/', BotWhatsAppToggleView.as_view(), name='bot-toggle-whatsapp'),
 ] 

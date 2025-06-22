@@ -13,7 +13,6 @@ class BotSerializer(serializers.ModelSerializer):
             'name',
             'phone_number',
             'status',
-            'flow_data',
             'whatsapp_connected',
             'created_at',
             'last_updated',

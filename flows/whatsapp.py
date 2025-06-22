@@ -8,13 +8,12 @@ logger = logging.getLogger(__name__)
 class WhatsAppClient:
     """Client for sending messages via WhatsApp Cloud API"""
     
-    BASE_URL = "https://graph.facebook.com/v17.0"
+    BASE_URL = "https://graph.facebook.com/v23.0"
     
     def __init__(self):
         self.access_token = settings.WHATSAPP_ACCESS_TOKEN
-        self.phone_number_id = settings.WHATSAPP_PHONE_NUMBER_ID
         
-    def send_message(self, to: str, message: str) -> Dict[str, Any]:
+    def send_message(self, to: str, phone_number_id: str, message: str) -> Dict[str, Any]:
         """
         Send a text message to a WhatsApp user
         
@@ -25,7 +24,7 @@ class WhatsAppClient:
         Returns:
             API response data
         """
-        url = f"{self.BASE_URL}/{self.phone_number_id}/messages"
+        url = f"{self.BASE_URL}/{phone_number_id}/messages"
         
         headers = {
             "Authorization": f"Bearer {self.access_token}",
@@ -56,7 +55,7 @@ class WhatsAppClient:
                 logger.error(f"WhatsApp API error response: {response.text}")
             raise
     
-    def send_messages(self, to: str, messages: List[str]) -> List[Dict[str, Any]]:
+    def send_messages(self, to: str, phone_number_id: str, messages: List[str]) -> List[Dict[str, Any]]:
         """
         Send multiple messages to a WhatsApp user
         
@@ -71,7 +70,7 @@ class WhatsAppClient:
         
         for message in messages:
             try:
-                response = self.send_message(to, message)
+                response = self.send_message(to, phone_number_id, message)
                 responses.append(response)
             except Exception as e:
                 logger.error(f"Failed to send message: {str(e)}")

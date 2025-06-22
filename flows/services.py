@@ -24,27 +24,23 @@ class FlowExecutionService:
             List of responses to send back to WhatsApp
         """
         try:
-            # Extract phone number and message from webhook
-            phone_number = self._extract_phone_number(webhook_data)
+            phone_number_id = self._extract_phone_number_id(webhook_data)
             message = self._extract_message(webhook_data)
             
-            if not phone_number or not message:
+            if not phone_number_id or not message:
                 logger.error("Missing phone number or message in webhook data")
                 return []
             
-            # Find the bot for this phone number
-            bot = self._get_bot(phone_number)
+            bot = self._get_bot(phone_number_id)
             if not bot:
-                logger.error(f"No bot found for phone number: {phone_number}")
+                logger.error(f"No bot found for phone number: {phone_number_id}")
                 return []
             
-            # Get active flow for the bot
             flow = self._get_active_flow(bot)
             if not flow:
                 logger.error(f"No active flow found for bot: {bot.id}")
                 return []
             
-            # Execute the flow
             return self.execute_flow(flow, message)
             
         except Exception as e:
@@ -63,14 +59,14 @@ class FlowExecutionService:
             List of responses to send back to the user
         """
         try:
-            # Create context with necessary data
             context = {
                 "openai_api_key": self.openai_api_key,
                 "flow_id": flow.id,
-                "bot_id": flow.bot.id
+                "bot_id": flow.bot.id,
+                "files": list(flow.uploaded_files.all()),
+                "gdrive_links": flow.flow_data.get("gdrive_links", [])
             }
             
-            # Initialize and run the flow engine
             engine = FlowEngine(
                 flow_data=flow.flow_data,
                 user_input=user_input,
@@ -83,10 +79,15 @@ class FlowExecutionService:
             logger.error(f"Error executing flow {flow.id}: {str(e)}")
             return ["I apologize, but I'm having trouble processing your request right now."]
     
+    def _extract_phone_number_id(self, webhook_data: Dict[str, Any]) -> Optional[str]:
+        """Extract phone number from webhook data"""
+        try:
+            return webhook_data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {}).get("metadata", {}).get("phone_number_id")
+        except (IndexError, KeyError):
+            return None
+        
     def _extract_phone_number(self, webhook_data: Dict[str, Any]) -> Optional[str]:
         """Extract phone number from webhook data"""
-        # This needs to be implemented based on your WhatsApp webhook format
-        # Example implementation:
         try:
             return webhook_data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {}).get("messages", [{}])[0].get("from")
         except (IndexError, KeyError):
@@ -94,17 +95,15 @@ class FlowExecutionService:
     
     def _extract_message(self, webhook_data: Dict[str, Any]) -> Optional[str]:
         """Extract message text from webhook data"""
-        # This needs to be implemented based on your WhatsApp webhook format
-        # Example implementation:
         try:
             return webhook_data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {}).get("messages", [{}])[0].get("text", {}).get("body")
         except (IndexError, KeyError):
             return None
     
-    def _get_bot(self, phone_number: str) -> Optional[Bot]:
-        """Get bot by phone number"""
+    def _get_bot(self, phone_number_id: str) -> Optional[Bot]:
+        """Get bot by phone number ID"""
         try:
-            return Bot.objects.get(phone_number=phone_number, whatsapp_connected=True)
+            return Bot.objects.get(phone_number_id=phone_number_id, whatsapp_connected=True)
         except Bot.DoesNotExist:
             return None
     

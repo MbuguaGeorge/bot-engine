@@ -13,6 +13,8 @@ import hashlib
 import logging
 from .services import FlowExecutionService
 from .whatsapp import WhatsAppClient
+from .models import UploadedFile
+from .serializers import UploadedFileSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,42 @@ class FlowDetailView(APIView):
         flow.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+class FileUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, flow_id):
+        try:
+            flow = Flow.objects.get(pk=flow_id, bot__user=request.user)
+        except Flow.DoesNotExist:
+            return Response({'error': 'Flow not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        files = request.FILES.getlist('file')
+        node_id = request.data.get('node_id')
+
+        if not node_id:
+            return Response({'error': 'node_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not files:
+            return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
+
+        uploaded_file_objects = []
+        for f in files:
+            uploaded_file = UploadedFile.objects.create(flow=flow, file=f, name=f.name, node_id=node_id)
+            uploaded_file_objects.append(uploaded_file)
+        
+        serializer = UploadedFileSerializer(uploaded_file_objects, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+class FileDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, flow_id, file_id):
+        flow = get_object_or_404(Flow, id=flow_id, bot__user=request.user)
+        file_instance = get_object_or_404(UploadedFile, id=file_id, flow=flow)
+        
+        file_instance.delete()
+        
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 class WhatsAppWebhookView(APIView):
     permission_classes = [AllowAny]  # WhatsApp needs to access this endpoint
     
@@ -100,22 +138,27 @@ class WhatsAppWebhookView(APIView):
             return Response('Invalid signature', status=status.HTTP_403_FORBIDDEN)
         
         try:
-            # Extract the sender's phone number
+            entry = request.data.get("entry", [])[0]
+            changes = entry.get("changes", [])[0]
+            value = changes.get("value", {})
+            
+            if "messages" not in value:
+                return Response({'status': 'ignored (not a message event)'}, status=200)
+    
             phone_number = self.flow_service._extract_phone_number(request.data)
+            phone_number_id = self.flow_service._extract_phone_number_id(request.data)
+            
             if not phone_number:
                 logger.error("Could not extract phone number from webhook data")
                 return Response('Invalid webhook data', status=status.HTTP_400_BAD_REQUEST)
             
-            # Process the webhook and get responses
             responses = self.flow_service.process_webhook(request.data)
             
-            # Send responses back to WhatsApp
             if responses:
                 try:
-                    self.whatsapp_client.send_messages(phone_number, responses)
+                    self.whatsapp_client.send_messages(phone_number, phone_number_id, responses)
                 except Exception as e:
                     logger.error(f"Error sending WhatsApp messages: {str(e)}")
-                    # We still return 200 to WhatsApp to acknowledge receipt
             
             return Response({'status': 'success'})
             

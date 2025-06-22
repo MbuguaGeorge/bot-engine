@@ -10,6 +10,7 @@ class Bot(models.Model):
 
     name = models.CharField(max_length=255)
     phone_number = models.CharField(max_length=20, unique=True, null=True, blank=True, help_text="WhatsApp phone number in international format (e.g., +1234567890)")
+    phone_number_id = models.CharField(max_length=255, unique=True, null=True, blank=True, help_text="WhatsApp phone number ID")
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -20,7 +21,6 @@ class Bot(models.Model):
         on_delete=models.CASCADE,
         related_name='bots'
     )
-    flow_data = models.JSONField(default=dict)
     whatsapp_connected = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     last_updated = models.DateTimeField(auto_now=True)

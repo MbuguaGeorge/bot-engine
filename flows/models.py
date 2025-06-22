@@ -46,3 +46,33 @@ class Flow(models.Model):
         
         self.clean()
         super().save(*args, **kwargs)
+
+
+def flow_directory_path(instance, filename):
+    """
+    Generates a unique path for each uploaded file.
+    Example: flows/<bot_id>/<flow_id>/<filename>
+    """
+    return f'flows/{instance.flow.bot.id}/{instance.flow.id}/{filename}'
+
+class UploadedFile(models.Model):
+    """
+    Represents a file uploaded by a user for a specific flow,
+    to be used in AI nodes for context.
+    """
+    flow = models.ForeignKey(Flow, on_delete=models.CASCADE, related_name='uploaded_files')
+    node_id = models.CharField(max_length=255, null=True, blank=True, help_text="The ID of the node within the flow this file belongs to.")
+    name = models.CharField(max_length=255, help_text="Original name of the file.")
+    file = models.FileField(upload_to=flow_directory_path)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f"{self.name} for Flow ID {self.flow.id}"
+
+    def delete(self, *args, **kwargs):
+        # Delete the file from storage as well
+        self.file.delete(save=False)
+        super().delete(*args, **kwargs)
