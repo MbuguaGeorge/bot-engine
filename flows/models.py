@@ -76,3 +76,14 @@ class UploadedFile(models.Model):
         # Delete the file from storage as well
         self.file.delete(save=False)
         super().delete(*args, **kwargs)
+
+
+class GoogleDocCache(models.Model):
+    link = models.URLField(unique=True)
+    last_hash = models.CharField(max_length=128, blank=True, null=True)
+    last_fetched = models.DateTimeField(auto_now=True)
+    flow = models.ForeignKey(Flow, on_delete=models.CASCADE, related_name='gdoc_caches')
+    node_id = models.CharField(max_length=255, null=True, blank=True)
+
+    def __str__(self):
+        return self.link

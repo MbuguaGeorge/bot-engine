@@ -1,10 +1,9 @@
 import os
-import json
+import fitz
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-
 
 DOCS_SCOPES = ['https://www.googleapis.com/auth/documents.readonly']
 SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
@@ -67,3 +66,13 @@ def extract_text_from_element(element) -> str:
             if 'textRun' in run:
                 text += run['textRun'].get('content', '')
     return text.strip()
+
+def fetch_pdf_text(file_path: str) -> str:
+    try:
+        text = ""
+        with fitz.open(file_path) as pdf:
+            for page in pdf:
+                text += page.get_text()
+        return text.strip()
+    except Exception as e:
+        return f"[Error extracting PDF text: {e}]"

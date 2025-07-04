@@ -1,5 +1,4 @@
 from typing import List, Dict, Any, Optional
-from django.conf import settings
 from bots.models import Bot
 from .models import Flow
 from .flow_engine import FlowEngine
@@ -9,9 +8,6 @@ logger = logging.getLogger(__name__)
 
 class FlowExecutionService:
     """Service for handling WhatsApp webhooks and executing flows"""
-    
-    def __init__(self):
-        self.openai_api_key = settings.OPENAI_API_KEY
     
     def process_webhook(self, webhook_data: Dict[str, Any]) -> List[str]:
         """
@@ -60,11 +56,11 @@ class FlowExecutionService:
         """
         try:
             context = {
-                "openai_api_key": self.openai_api_key,
                 "flow_id": flow.id,
                 "bot_id": flow.bot.id,
-                "files": list(flow.uploaded_files.all()),
-                "gdrive_links": flow.flow_data.get("gdrive_links", [])
+                "files": list(flow.uploaded_files.values_list('id', flat=True)),
+                "gdrive_links": flow.flow_data.get("gdrive_links", []),
+                "user_id": flow.bot.user.id,
             }
             
             engine = FlowEngine(

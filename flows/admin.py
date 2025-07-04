@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Flow, UploadedFile
+from .models import Flow, UploadedFile, GoogleDocCache
 
 @admin.register(Flow)
 class FlowAdmin(admin.ModelAdmin):
@@ -12,3 +12,9 @@ class UploadedFileAdmin(admin.ModelAdmin):
     list_display = ('name', 'flow', 'uploaded_at')
     search_fields = ('name', 'flow__name')
     list_filter = ('uploaded_at',)
+
+@admin.register(GoogleDocCache)
+class GoogleDocCacheAdmin(admin.ModelAdmin):
+    list_display = ('link', 'flow', 'node_id', 'last_fetched')
+    search_fields = ('link', 'flow__name')
+    list_filter = ('last_fetched',)

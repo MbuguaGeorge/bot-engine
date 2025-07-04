@@ -15,6 +15,7 @@ from .services import FlowExecutionService
 from .whatsapp import WhatsAppClient
 from .models import UploadedFile
 from .serializers import UploadedFileSerializer
+from Engines.rag_engine.tasks import upsert_pdf_to_pinecone, delete_pdf_from_pinecone
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,16 @@ class FileUploadView(APIView):
         for f in files:
             uploaded_file = UploadedFile.objects.create(flow=flow, file=f, name=f.name, node_id=node_id)
             uploaded_file_objects.append(uploaded_file)
-        
+            ext = f.name.split('.')[-1].lower()
+            if ext == 'pdf':
+                upsert_pdf_to_pinecone.delay(
+                    file_id=uploaded_file.id,
+                    user_id=flow.bot.user.id,
+                    bot_id=flow.bot.id,
+                    flow_id=flow.id,
+                    node_id=node_id
+                )
+                
         serializer = UploadedFileSerializer(uploaded_file_objects, many=True)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -101,9 +111,17 @@ class FileDeleteView(APIView):
     def delete(self, request, flow_id, file_id):
         flow = get_object_or_404(Flow, id=flow_id, bot__user=request.user)
         file_instance = get_object_or_404(UploadedFile, id=file_id, flow=flow)
+
+        # delete from pinecone
+        delete_pdf_from_pinecone.delay(
+            file_id=file_id,
+            user_id=flow.bot.user.id,
+            bot_id=flow.bot.id,
+            flow_id=flow.id,
+            node_id=file_instance.node_id
+        )
         
         file_instance.delete()
-        
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class WhatsAppWebhookView(APIView):

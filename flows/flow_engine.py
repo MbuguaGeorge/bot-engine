@@ -1,12 +1,7 @@
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass
 import logging
-from openai import OpenAI
-import json
-import PyPDF2
-import requests
-from io import BytesIO
-from django.core.files.storage import default_storage
+from Engines.rag_engine.engine import RAGEngine
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +18,7 @@ class FlowEngine:
     Handles different node types and maintains execution context.
     """
     
-    def __init__(self, flow_data: Dict[str, Any], user_input: str, context: Dict[str, Any]):
+    def __init__(self, flow_data: Dict[str, Any], user_input: str, context: List[Any]):
         """
         Initialize the flow engine.
         
@@ -36,14 +31,11 @@ class FlowEngine:
         self.edges = flow_data.get("edges", [])
         self.files = context.get("files", [])
         self.gdrive_links = context.get("gdrive_links", [])
-        self.context = context or {}
+        self.context = context
         self.user_input = user_input
         self.current_node = self.get_entry_node()
         self.variables: Dict[str, Any] = {}
         
-        # Initialize OpenAI client if API key is in context
-        self.openai_client = OpenAI()
-
     def get_entry_node(self) -> Dict[str, Any]:
         """Find the entry node in the flow"""
         for node in self.nodes.values():
@@ -147,97 +139,28 @@ class FlowEngine:
             variables={}
         )
 
-    def _get_document_context(self) -> str:
-        """
-        Retrieves and concatenates content from uploaded files and Google Drive links.
-        """
-        content = []
-        
-        # From uploaded files
-        for file_info in self.files:
-            try:
-                with default_storage.open(file_info.file.name, 'rb') as f:
-                    if file_info.name.lower().endswith('.pdf'):
-                        reader = PyPDF2.PdfReader(f)
-                        for page in reader.pages:
-                            content.append(page.extract_text())
-                    else:
-                        # Basic text file reading
-                        content.append(f.read().decode('utf-8'))
-            except Exception as e:
-                logger.error(f"Error reading file {file_info.name}: {e}")
-
-        # From Google Drive links
-        for link in self.gdrive_links:
-            try:
-                # Basic handling for public Google Docs/Sheets
-                if "docs.google.com/document" in link:
-                    export_url = link.replace('/edit', '/export?format=txt')
-                    response = requests.get(export_url)
-                    response.raise_for_status()
-                    content.append(response.text)
-                elif "docs.google.com/spreadsheets" in link:
-                    export_url = link.replace('/edit', '/export?format=csv')
-                    response = requests.get(export_url)
-                    response.raise_for_status()
-                    content.append(response.text)
-            except Exception as e:
-                logger.error(f"Error fetching Google Drive link {link}: {e}")
-
-        return "\n\n".join(content)
 
     def handle_aiNode(self, node: Dict[str, Any]) -> NodeResponse:
         """Handle AI response node"""
-        if not self.openai_client:
-            raise ValueError("OpenAI API key not provided in context")
-            
-        system_prompt = node["data"].get("systemPrompt", "")
-        model = node["data"].get("model", "gpt-4o")
-        fallback_response = node["data"].get("fallbackResponse", "I can't answer that right now.")
-        extra_instructions = node["data"].get("extraInstructions", "Mention the 30% discount where relevant")
-
-        # document_context = self._get_document_context()
-        document_context = ""
-        
-        # Combine prompts and context
-        final_system_prompt = f"""{system_prompt}
-        You have the following context from documents to help you answer:
-        ---
-        {document_context}
-        ---
-
-        {extra_instructions}
-        """
-        
-        # Replace variables in system prompt
-        for var_name, var_value in self.variables.items():
-            final_system_prompt = final_system_prompt.replace(f"{{{var_name}}}", str(var_value))
-        
         try:
-            response = self.openai_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": final_system_prompt},
-                    {"role": "user", "content": self.user_input}
-                ]
-            )
-            
-            ai_response = response.choices[0].message.content
-            
+            rag_engine = RAGEngine(node, self.context)
+            response = rag_engine.run(self.user_input)
+
             next_id = self.get_next_node_id(node["id"])
             return NodeResponse(
-                responses=[ai_response],
+                responses=[response],
                 next_node_id=next_id,
-                variables={"ai_response": ai_response}
+                variables={"ai_response": response}
             )
-            
+        
         except Exception as e:
-            logger.error(f"Error calling OpenAI API: {str(e)}")
+            logger.error(f"Error executing AI node {node['id']}: {e}")
             return NodeResponse(
-                responses=[fallback_response],
-                next_node_id=self.get_next_node_id(node["id"]), # Still proceed in flow
+                responses=[node["data"].get("fallbackResponse", "Sorry, I can't answer that right now.")],
+                next_node_id=self.get_next_node_id(node["id"]),
                 variables={}
             )
+    
 
     def handle_conditionNode(self, node: Dict[str, Any]) -> NodeResponse:
         """Handle condition node"""
