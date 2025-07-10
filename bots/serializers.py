@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Bot
 from flows.models import Flow
+from bots.models import WhatsAppBusinessAccount
 
 class BotSerializer(serializers.ModelSerializer):
     flows = serializers.SerializerMethodField()
@@ -88,7 +89,12 @@ class BotDetailSerializer(BotSerializer):
         flow = obj.flows.filter(is_active=True).first()
         if flow:
             return {'id': str(flow.id), 'name': flow.name}
-        return None 
-    
+        return None
 
-# I need to create a function that parses the field flow data and extracts the important details..for example, we need to know the start node and the next node, data for each node, 
+class WhatsAppBusinessAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WhatsAppBusinessAccount
+        fields = [
+            'id', 'bot', 'user', 'business_id', 'business_name', 'access_token', 'phone_number_id', 'phone_number', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'user']

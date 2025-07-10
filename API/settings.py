@@ -178,6 +178,12 @@ LOGS_DIR.mkdir(exist_ok=True)
 PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
 PINECONE_INDEX_NAME = os.getenv('PINECONE_INDEX_NAME')
 
+# Meta settings
+META_APP_ID = os.getenv("META_APP_ID")
+META_APP_SECRET = os.getenv("META_APP_SECRET")
+META_REDIRECT_URI = os.getenv("META_REDIRECT_URI")
+
+
 # Logging Configuration
 LOGGING = {
     'version': 1,
