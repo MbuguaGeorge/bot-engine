@@ -1,6 +1,9 @@
 from django.db import models
 from django.conf import settings
 from django.contrib.postgres.fields import JSONField
+from .redis_pub import publish_notification
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 class Bot(models.Model):
     STATUS_CHOICES = [
@@ -80,7 +83,35 @@ class NotificationManager(models.Manager):
             message=message,
             data=data or {}
         )
+        # Publish to Redis
+        payload = {
+            "user_id": user.id,
+            "data": {
+                "type": type,
+                "message": message,
+                "title": title,
+                "timestamp": notification.created_at.isoformat(),
+                "id": notification.id,
+                "is_read": notification.is_read,
+                "bot_id": bot.id if bot else None,
+                "extra": data or {},
+            }
+        }
+        publish_notification(payload)
         return notification
+
+    def publish_mark_read(self, notification):
+        payload = {
+            "user_id": notification.user.id,
+            "data": {
+                "type": "notification_read",
+                "id": notification.id,
+                "is_read": notification.is_read,
+                "timestamp": notification.created_at.isoformat(),
+                "bot_id": notification.bot.id if notification.bot else None,
+            }
+        }
+        publish_notification(payload)
 
 class Notification(models.Model):
     NOTIFICATION_TYPES = [
@@ -111,3 +142,21 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+@receiver(post_save, sender=Notification)
+def notification_post_save(sender, instance, created, **kwargs):
+    payload = {
+        "user_id": instance.user.id,
+        "data": {
+            "type": instance.type,
+            "message": instance.message,
+            "title": instance.title,
+            "timestamp": instance.created_at.isoformat(),
+            "id": instance.id,
+            "is_read": instance.is_read,
+            "bot_id": instance.bot.id if instance.bot else None,
+            "extra": instance.data or {},
+        }
+    }
+    publish_notification(payload)

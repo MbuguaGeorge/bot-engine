@@ -1,10 +1,23 @@
 from typing import List, Dict, Any, Optional
 from bots.models import Bot
-from .models import Flow
+from .models import Flow, Conversation
 from .flow_engine import FlowEngine
 import logging
+import json
+import redis
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+# Redis client for publishing chat messages
+_redis_client = None
+
+def get_redis_client():
+    global _redis_client
+    if _redis_client is None:
+        redis_url = getattr(settings, 'REDIS_URL', 'redis://localhost:6379/0')
+        _redis_client = redis.Redis.from_url(redis_url)
+    return _redis_client
 
 class FlowExecutionService:
     """Service for handling WhatsApp webhooks and executing flows"""
@@ -22,6 +35,7 @@ class FlowExecutionService:
         try:
             phone_number_id = self._extract_phone_number_id(webhook_data)
             message = self._extract_message(webhook_data)
+            phone_number = self._extract_phone_number(webhook_data)
             
             if not phone_number_id or not message:
                 logger.error("Missing phone number or message in webhook data")
@@ -37,11 +51,85 @@ class FlowExecutionService:
                 logger.error(f"No active flow found for bot: {bot.id}")
                 return []
             
-            return self.execute_flow(flow, message)
-            
+            # Conversation handoff logic
+            conversation_id = f"bot_{bot.id}_{phone_number}"
+            conversation, _ = Conversation.objects.get_or_create(
+                conversation_id=conversation_id,
+                bot=bot,
+                defaults={"user_id": phone_number}
+            )
+            # Always publish user messages to Node.js chat service for display
+            self._store_chat_message(bot.id, phone_number, message, 'user')
+            # Handoff keyword detection
+            HANDOFF_KEYWORD = '#agent'
+            if message.strip().lower() == HANDOFF_KEYWORD:
+                if not conversation.handoff_active:
+                    conversation.handoff_active = True
+                    conversation.save(update_fields=["handoff_active"])
+                    logger.info(f"Handoff activated for {conversation_id}")
+                return []  # Do not process bot flow when handoff is triggered
+            # If handoff is active, pause bot replies
+            if conversation.handoff_active:
+                logger.info(f"Handoff active for {conversation_id}, skipping bot flow.")
+                return []
+            responses = self.execute_flow(flow, message)
+            # Publish bot responses to Node.js chat service for display
+            redis_client = get_redis_client()
+            for resp in responses:
+                bot_message_data = {
+                    "conversation_id": conversation_id,
+                    "bot_id": str(bot.id),
+                    "message": {
+                        "sender": "bot",
+                        "from": phone_number_id,
+                        "content": resp,
+                        "type": "text",
+                        "status": "sent",
+                        "timestamp": self._get_current_timestamp()
+                    }
+                }
+                try:
+                    redis_client.publish(f"chat_message_{bot.id}", json.dumps(bot_message_data))
+                    logger.info(f"Published bot reply to Redis: {conversation_id} - bot: {resp[:50]}...")
+                except Exception as re:
+                    logger.error(f"Redis publish error (bot reply): {re}")
+            return responses
         except Exception as e:
             logger.error(f"Error processing webhook: {str(e)}")
             return []
+    
+    def _store_chat_message(self, bot_id: int, phone_number: str, content: str, sender: str):
+        """Store message in Node.js chat service via Redis (only for user messages)"""
+        try:
+            if sender != 'user':
+                return  # Only publish user messages to Node.js
+            conversation_id = f"bot_{bot_id}_{phone_number}"
+            message_data = {
+                "conversation_id": conversation_id,
+                "bot_id": str(bot_id),
+                "message": {
+                    "sender": sender,
+                    "from": phone_number,
+                    "content": content,
+                    "type": "text",
+                    "status": "sent",
+                    "timestamp": self._get_current_timestamp()
+                }
+            }
+            redis_client = get_redis_client()
+            try:
+                redis_client.publish('chat_message', json.dumps(message_data))
+                logger.info(f"Published chat message to Redis: {conversation_id} - {sender}: {content[:50]}...")
+            except Exception as re:
+                logger.error(f"Redis publish error: {re}")
+        except Exception as e:
+            logger.error(f"Error storing chat message: {str(e)}")
+            # Don't raise the exception to avoid breaking the webhook flow
+    
+    def _get_current_timestamp(self) -> str:
+        """Get current timestamp in ISO format"""
+        from datetime import datetime
+        return datetime.utcnow().isoformat() + 'Z'
     
     def execute_flow(self, flow: Flow, user_input: str) -> List[str]:
         """
@@ -109,3 +197,21 @@ class FlowExecutionService:
             return Flow.objects.get(bot=bot, status='active')
         except Flow.DoesNotExist:
             return None 
+
+    def set_handoff(self, conversation_id: str, bot: Bot, active: bool):
+        conversation, _ = Conversation.objects.get_or_create(
+            conversation_id=conversation_id,
+            bot=bot,
+            defaults={"user_id": ""}
+        )
+        conversation.handoff_active = active
+        conversation.save(update_fields=["handoff_active"])
+        logger.info(f"Set handoff for {conversation_id} to {active}")
+        return conversation
+
+    def is_handoff_active(self, conversation_id: str, bot: Bot) -> bool:
+        try:
+            conversation = Conversation.objects.get(conversation_id=conversation_id, bot=bot)
+            return conversation.handoff_active
+        except Conversation.DoesNotExist:
+            return False 

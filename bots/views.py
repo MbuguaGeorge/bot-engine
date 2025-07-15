@@ -316,11 +316,16 @@ class NotificationMarkReadView(APIView):
         is_read = request.data.get('is_read', True)
         notification.is_read = is_read
         notification.save()
+        Notification.objects.publish_mark_read(notification)
         return Response({'success': True, 'id': notification.id, 'is_read': notification.is_read})
 
 class NotificationMarkAllReadView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+        notifications = Notification.objects.filter(user=request.user, is_read=False)
+        notifications.update(is_read=True)
+        # Publish for each notification
+        for n in notifications:
+            Notification.objects.publish_mark_read(n)
         return Response({'success': True})

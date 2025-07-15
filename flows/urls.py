@@ -4,7 +4,9 @@ from .views import (
     FlowDetailView,
     FileUploadView,
     FileDeleteView,
-    WhatsAppWebhookView
+    WhatsAppWebhookView,
+    ConversationHandoffView,
+    send_whatsapp_message,
 )
 
 app_name = 'flows'
@@ -15,4 +17,6 @@ urlpatterns = [
     path('flows/<int:flow_id>/upload/', FileUploadView.as_view(), name='file-upload'),
     path('flows/<int:flow_id>/files/<int:file_id>/', FileDeleteView.as_view(), name='file-delete'),
     path('webhook/whatsapp/', WhatsAppWebhookView.as_view(), name='whatsapp-webhook'),
+    path('flows/handoff/', ConversationHandoffView.as_view(), name='conversation-handoff'),
+    path('flows/send_whatsapp_message/', send_whatsapp_message, name='send-whatsapp-message'),
 ] 

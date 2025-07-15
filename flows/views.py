@@ -4,18 +4,23 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
-from .models import Flow
+from .models import Flow, UploadedFile, Conversation
 from bots.models import Bot
 from .serializers import FlowSerializer
 from django.conf import settings
+import redis, json
 import hmac
 import hashlib
 import logging
 from .services import FlowExecutionService
 from .whatsapp import WhatsAppClient
-from .models import UploadedFile
 from .serializers import UploadedFileSerializer
 from Engines.rag_engine.tasks import upsert_pdf_to_pinecone, delete_pdf_from_pinecone
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from .whatsapp import WhatsAppClient
+from .models import Conversation
+from bots.models import Bot
 
 logger = logging.getLogger(__name__)
 
@@ -204,3 +209,80 @@ class WhatsAppWebhookView(APIView):
         
         # Compare signatures
         return hmac.compare_digest(f"sha256={expected_signature}", signature)
+
+class ConversationHandoffView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """Set handoff status for a conversation (enable/disable handoff)"""
+        conversation_id = request.data.get('conversation_id')
+        bot_id = request.data.get('bot_id')
+        active = request.data.get('active')
+        if not conversation_id or not bot_id or active is None:
+            return Response({'error': 'conversation_id, bot_id, and active are required'}, status=400)
+        try:
+            bot = Bot.objects.get(id=bot_id, user=request.user)
+        except Bot.DoesNotExist:
+            return Response({'error': 'Bot not found'}, status=404)
+        FlowExecutionService().set_handoff(conversation_id, bot, bool(active))
+        return Response({'success': True, 'handoff_active': bool(active)})
+
+    def get(self, request):
+        """Get handoff status for a conversation"""
+        conversation_id = request.query_params.get('conversation_id')
+        bot_id = request.query_params.get('bot_id')
+        if not conversation_id or not bot_id:
+            return Response({'error': 'conversation_id and bot_id are required'}, status=400)
+        try:
+            bot = Bot.objects.get(id=bot_id, user=request.user)
+        except Bot.DoesNotExist:
+            return Response({'error': 'Bot not found'}, status=404)
+        active = FlowExecutionService().is_handoff_active(conversation_id, bot)
+        return Response({'handoff_active': active})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_whatsapp_message(request):
+    conversation_id = request.data.get('conversation_id')
+    bot_id = request.data.get('bot_id')
+    message = request.data.get('message')
+    if not conversation_id or not bot_id or not message:
+        return Response({'error': 'conversation_id, bot_id, and message are required'}, status=400)
+    try:
+        bot = Bot.objects.get(id=bot_id, user=request.user)
+    except Bot.DoesNotExist:
+        return Response({'error': 'Bot not found'}, status=404)
+    
+    try:
+        conversation = Conversation.objects.get(conversation_id=conversation_id, bot=bot)
+    except Conversation.DoesNotExist:
+        return Response({'error': 'Conversation not found'}, status=404)
+    phone_number = request.data.get('user_id') or conversation.user_id
+    phone_number_id = bot.phone_number_id
+    if not phone_number or not phone_number_id:
+        return Response({'error': 'Bot or conversation missing WhatsApp phone number info'}, status=400)
+    try:
+        client = WhatsAppClient()
+        resp = client.send_message(phone_number, phone_number_id, message)
+        # After sending, publish to Redis for Node.js chat storage
+        try:
+            redis_url = getattr(settings, 'REDIS_URL', 'redis://localhost:6379/0')
+            redis_client = redis.Redis.from_url(redis_url)
+            msg_data = {
+                "conversation_id": conversation_id,
+                "bot_id": str(bot_id),
+                "message": {
+                    "sender": "agent",
+                    "from": phone_number,
+                    "content": message,
+                    "type": "text",
+                    "status": "sent",
+                    "timestamp": __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+                }
+            }
+            redis_client.publish(f"chat_message_{bot_id}", json.dumps(msg_data))
+        except Exception as re:
+            logger.error(f"Redis publish error (agent message): {re}")
+        return Response({'success': True, 'whatsapp_response': resp})
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)

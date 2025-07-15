@@ -87,3 +87,22 @@ class GoogleDocCache(models.Model):
 
     def __str__(self):
         return self.link
+
+
+class Conversation(models.Model):
+    """
+    Represents a WhatsApp chat conversation for handoff tracking.
+    """
+    conversation_id = models.CharField(max_length=255, unique=True, db_index=True)
+    bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='conversations')
+    user_id = models.CharField(max_length=255, db_index=True)
+    handoff_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        unique_together = ['bot', 'conversation_id']
+
+    def __str__(self):
+        return f"Conversation {self.conversation_id} (Bot {self.bot_id}) Handoff: {self.handoff_active}"

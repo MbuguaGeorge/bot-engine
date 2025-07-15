@@ -286,3 +286,7 @@ CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+
+# Redis configuration for chat and notifications
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+
