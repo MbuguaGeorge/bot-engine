@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'bots',
     'flows',
     'Engines',
+    'subscription'
 ]
 
 MIDDLEWARE = [
@@ -146,7 +147,7 @@ SIMPLE_JWT = {
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8080').split(',')
 
 # OpenAI settings
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -290,3 +291,8 @@ CELERY_RESULT_SERIALIZER = 'json'
 # Redis configuration for chat and notifications
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+# Frontend URL for redirects
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8080')

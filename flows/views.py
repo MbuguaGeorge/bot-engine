@@ -80,19 +80,19 @@ class FileUploadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, flow_id):
+        from bots.models import Bot
+        if not Bot.can_user_create_or_edit(request.user):
+            return Response({'error': 'Your subscription has expired. Please subscribe to edit bot flows.'}, status=403)
         try:
             flow = Flow.objects.get(pk=flow_id, bot__user=request.user)
         except Flow.DoesNotExist:
             return Response({'error': 'Flow not found'}, status=status.HTTP_404_NOT_FOUND)
-
         files = request.FILES.getlist('file')
         node_id = request.data.get('node_id')
-
         if not node_id:
             return Response({'error': 'node_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not files:
             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
-
         uploaded_file_objects = []
         for f in files:
             uploaded_file = UploadedFile.objects.create(flow=flow, file=f, name=f.name, node_id=node_id)
@@ -106,7 +106,6 @@ class FileUploadView(APIView):
                     flow_id=flow.id,
                     node_id=node_id
                 )
-                
         serializer = UploadedFileSerializer(uploaded_file_objects, many=True)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 

@@ -16,22 +16,22 @@ class UserSerializer(serializers.ModelSerializer):
 
     def validate_password(self, value):
         if len(value) < 8:
-            raise serializers.ValidationError("Password must be at least 8 characters long.")
+            raise serializers.ValidationError("Your password must be at least 8 characters long.")
         return value
 
     def validate_email(self, value):
         try:
             validate_email(value)
         except ValidationError:
-            raise serializers.ValidationError("Enter a valid email address.")
+            raise serializers.ValidationError("Please enter a valid email address.")
         
         if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
+            raise serializers.ValidationError("An account with this email address already exists. Please try logging in instead.")
         return value
 
     def validate_full_name(self, value):
         if len(value.strip()) == 0:
-            raise serializers.ValidationError("Full name cannot be empty.")
+            raise serializers.ValidationError("Please enter your full name.")
         return value.strip()
 
     def create(self, validated_data):

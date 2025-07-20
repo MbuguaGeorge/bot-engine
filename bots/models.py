@@ -4,6 +4,8 @@ from django.contrib.postgres.fields import JSONField
 from .redis_pub import publish_notification
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from subscription.models import Subscription
+from django.utils import timezone
 
 class Bot(models.Model):
     STATUS_CHOICES = [
@@ -36,6 +38,29 @@ class Bot(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.get_status_display()})"
+
+    @staticmethod
+    def can_user_create_or_edit(user):
+        sub = Subscription.objects.filter(user=user, status__in=['active', 'trialing', 'canceled']).order_by('-current_period_end').first()
+        if not sub:
+            return False
+        now = timezone.now()
+        if sub.status == 'trialing' and sub.trial_end and sub.trial_end < now:
+            return False
+        if sub.status in ['active', 'canceled'] and sub.current_period_end and sub.current_period_end < now:
+            return False
+        return True
+
+    def user_has_active_subscription(self):
+        sub = Subscription.objects.filter(user=self.user, status__in=['active', 'trialing', 'canceled']).order_by('-current_period_end').first()
+        if not sub:
+            return False
+        now = timezone.now()
+        if sub.status == 'trialing' and sub.trial_end and sub.trial_end < now:
+            return False
+        if sub.status in ['active', 'canceled'] and sub.current_period_end and sub.current_period_end < now:
+            return False
+        return True
 
 
 class WhatsAppBusinessAccount(models.Model):

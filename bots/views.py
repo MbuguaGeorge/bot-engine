@@ -25,6 +25,8 @@ class BotListCreateView(APIView):
     
     def post(self, request):
         """Create a new bot"""
+        if not Bot.can_user_create_or_edit(request.user):
+            return Response({'error': 'Your subscription has expired. Please subscribe to create a new bot.'}, status=403)
         serializer = BotSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             bot = serializer.save()
@@ -52,6 +54,8 @@ class BotDetailView(APIView):
     
     def put(self, request, pk):
         """Update a bot"""
+        if not Bot.can_user_create_or_edit(request.user):
+            return Response({'error': 'Your subscription has expired. Please subscribe to edit bots.'}, status=403)
         bot = self.get_object(pk, request.user)
         serializer = BotDetailSerializer(bot, data=request.data, context={'request': request})
         if serializer.is_valid():
@@ -61,6 +65,8 @@ class BotDetailView(APIView):
     
     def patch(self, request, pk):
         """Partially update a bot"""
+        if not Bot.can_user_create_or_edit(request.user):
+            return Response({'error': 'Your subscription has expired. Please subscribe to edit bots.'}, status=403)
         bot = self.get_object(pk, request.user)
         serializer = BotDetailSerializer(bot, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():

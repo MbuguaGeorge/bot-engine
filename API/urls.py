@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/', include('account.urls')),
     path('api/', include('bots.urls')),
     path('api/', include('flows.urls')),
+    path('api/subscription/', include('subscription.urls')),
 ]
 
 if settings.DEBUG:
