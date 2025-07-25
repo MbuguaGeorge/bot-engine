@@ -7,6 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model, authenticate, update_session_auth_hash
 from django.utils import timezone
 from .serializers import UserSerializer
+from bots.services import NotificationService, NOTIFICATION_EVENT_TYPES
 
 User = get_user_model()
 
@@ -81,6 +82,13 @@ class CurrentUserView(APIView):
     def get(self, request):
         return Response(UserSerializer(request.user).data)
 
+    def patch(self, request):
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -100,7 +108,13 @@ class ChangePasswordView(APIView):
         request.user.set_password(new_password)
         request.user.save()
         update_session_auth_hash(request, request.user)
-        
+        # Trigger notification
+        NotificationService.create_and_send(
+            user=request.user,
+            type="password_change",
+            title="Password Changed",
+            message="Your password was changed successfully.",
+        )
         return Response({'message': 'Your password has been updated successfully!'})
 
 class DeleteAccountView(APIView):
@@ -119,7 +133,13 @@ class DeleteAccountView(APIView):
         request.user.is_pending_deletion = True
         request.user.deletion_requested_at = timezone.now()
         request.user.save()
-        
+        # Trigger notification
+        NotificationService.create_and_send(
+            user=request.user,
+            type="account_deletion_requested",
+            title="Account Deletion Requested",
+            message="Your account has been scheduled for deletion in 60 days.",
+        )
         return Response({
             'message': 'Your account has been scheduled for deletion and will be permanently removed in 60 days.',
             'deletion_date': request.user.deletion_requested_at + timezone.timedelta(days=60)

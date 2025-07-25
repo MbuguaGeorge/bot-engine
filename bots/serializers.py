@@ -2,6 +2,8 @@ from rest_framework import serializers
 from .models import Bot
 from flows.models import Flow
 from bots.models import WhatsAppBusinessAccount
+from .models import NotificationSettings
+from .notification_types import NOTIFICATION_EVENT_TYPES
 
 class BotSerializer(serializers.ModelSerializer):
     flows = serializers.SerializerMethodField()
@@ -98,3 +100,20 @@ class WhatsAppBusinessAccountSerializer(serializers.ModelSerializer):
             'id', 'bot', 'user', 'business_id', 'business_name', 'access_token', 'phone_number_id', 'phone_number', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'user']
+
+class NotificationSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationSettings
+        fields = [
+            "email_notifications",
+            "sms_notifications",
+            "in_app_notifications",
+            "marketing_emails",
+            "platform_updates",
+            "bot_activity",
+            "bot_online_offline",
+            "new_messages",
+            "failed_delivery",
+            "new_chat_started",
+            "inactivity_threshold_minutes",
+        ]

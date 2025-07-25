@@ -1,11 +1,12 @@
 from django.db import models
 from django.conf import settings
-from django.contrib.postgres.fields import JSONField
 from .redis_pub import publish_notification
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from subscription.models import Subscription
 from django.utils import timezone
+from .notification_types import NOTIFICATION_EVENT_TYPES
+
 
 class Bot(models.Model):
     STATUS_CHOICES = [
@@ -185,3 +186,46 @@ def notification_post_save(sender, instance, created, **kwargs):
         }
     }
     publish_notification(payload)
+
+
+class NotificationSettings(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notification_settings")
+    # Core notification channel toggles
+    email_notifications = models.BooleanField(default=True)
+    sms_notifications = models.BooleanField(default=False)
+    in_app_notifications = models.BooleanField(default=True)
+    # Marketing/updates
+    marketing_emails = models.BooleanField(default=False)
+    platform_updates = models.BooleanField(default=True)
+    # Bot activity
+    bot_activity = models.BooleanField(default=True)
+    bot_online_offline = models.BooleanField(default=True)
+    new_messages = models.BooleanField(default=True)
+    failed_delivery = models.BooleanField(default=True)
+    new_chat_started = models.BooleanField(default=False)
+    # Advanced
+    inactivity_threshold_minutes = models.PositiveIntegerField(default=10, help_text="Minutes of inactivity before summary emails are sent for messaging events.")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"NotificationSettings({self.user.email})"
+
+    @staticmethod
+    def get_for_user(user):
+        return NotificationSettings.objects.get(user=user)
+
+
+IMPORTANT_NOTIFICATION_TYPES = [
+    "payment_failed",
+    "security_alert",
+    "account_deletion_requested",
+    "password_change",
+    "subscription_activated",
+    "payment_success",
+    "trial_ending",
+]
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def create_notification_settings(sender, instance, created, **kwargs):
+    if created:
+        NotificationSettings.objects.create(user=instance)

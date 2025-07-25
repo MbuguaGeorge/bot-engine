@@ -40,6 +40,10 @@ app.conf.beat_schedule = {
         'task': 'account.tasks.delete_expired_accounts',
         'schedule': 86400.0,  # Run daily
     },
+    'send-notification-summaries': {
+        'task': 'bots.models.NotificationService.send_summaries_to_inactive_users',
+        'schedule': 600.0,  # Every 10 minutes
+    },
 }
 
 @app.task(bind=True)

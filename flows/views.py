@@ -21,6 +21,15 @@ from rest_framework.permissions import IsAuthenticated
 from .whatsapp import WhatsAppClient
 from .models import Conversation
 from bots.models import Bot
+from Engines.rag_engine.utils import (
+    get_google_oauth_url, poll_for_token, store_google_token,
+    validate_google_file_access, list_user_google_files
+)
+from flows.models import GoogleUserFile
+from django.shortcuts import redirect
+from django.http import HttpResponse
+from urllib.parse import urlencode
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -285,3 +294,107 @@ def send_whatsapp_message(request):
         return Response({'success': True, 'whatsapp_response': resp})
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
+class GoogleOAuthDeviceCodeView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        data = get_google_oauth_url()
+        return Response(data)
+
+class GoogleOAuthTokenPollView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        device_code = request.data.get('device_code')
+        if not device_code:
+            return Response({'error': 'device_code required'}, status=400)
+        token_data = poll_for_token(device_code)
+        if token_data and 'access_token' in token_data:
+            store_google_token(request.user, token_data)
+            return Response({'success': True})
+        return Response({'error': 'Authorization pending or failed'}, status=400)
+
+class GoogleDocsLinkView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        link = request.data.get('link')
+        if not link:
+            return Response({'error': 'link required'}, status=400)
+        ok, msg = validate_google_file_access(request.user, link)
+        if ok:
+            return Response({'success': True, 'message': msg})
+        return Response({'error': msg}, status=400)
+
+class GoogleDocsListView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        files = list_user_google_files(request.user)
+        return Response({'files': files})
+
+class GoogleOAuthURLView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        # redirect_uri = request.build_absolute_uri('/api/google-oauth/callback/')
+        redirect_uri = 'https://39bed5907a80.ngrok-free.app/api/google-oauth/callback/'
+        params = {
+            'client_id': settings.GOOGLE_CLIENT_ID,
+            'redirect_uri': redirect_uri,
+            'response_type': 'code',
+            'scope': ' '.join([
+                'https://www.googleapis.com/auth/drive.readonly',
+                'https://www.googleapis.com/auth/documents.readonly',
+                'https://www.googleapis.com/auth/spreadsheets.readonly',
+            ]),
+            'access_type': 'offline',
+            'prompt': 'consent',
+            'state': str(request.user.id),
+        }
+        url = 'https://accounts.google.com/o/oauth2/v2/auth?' + urlencode(params)
+        return Response({'url': url})
+
+class GoogleOAuthCallbackView(APIView):
+    permission_classes = []  # No auth, Google will redirect here
+    def get(self, request):
+        code = request.GET.get('code')
+        state = request.GET.get('state')
+        error = request.GET.get('error')
+        if error:
+            return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"%s"}, "*");window.close();</script>' % error)
+        if not code or not state:
+            return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"Missing code or state"}, "*");window.close();</script>')
+        # Exchange code for tokens
+        redirect_uri = 'https://39bed5907a80.ngrok-free.app/api/google-oauth/callback/'
+        data = {
+            'code': code,
+            'client_id': settings.GOOGLE_CLIENT_ID,
+            'client_secret': settings.GOOGLE_CLIENT_SECRET,
+            'redirect_uri': redirect_uri,
+            'grant_type': 'authorization_code',
+        }
+        token_resp = requests.post('https://oauth2.googleapis.com/token', data=data)
+        if token_resp.status_code != 200:
+            return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"Token exchange failed"}, "*");window.close();</script>')
+        token_data = token_resp.json()
+        # Save all relevant info to GoogleOAuthToken
+        from flows.models import GoogleOAuthToken
+        from django.utils import timezone
+        import datetime
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=state)
+        except User.DoesNotExist:
+            return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"User not found"}, "*");window.close();</script>')
+        expires_in = token_data.get('expires_in', 3600)
+        expires_at = timezone.now() + datetime.timedelta(seconds=expires_in)
+        GoogleOAuthToken.objects.update_or_create(
+            user=user,
+            defaults={
+                'access_token': token_data.get('access_token', ''),
+                'refresh_token': token_data.get('refresh_token', ''),
+                'expires_at': expires_at,
+                'scope': token_data.get('scope', ''),
+                'token_type': token_data.get('token_type', ''),
+            }
+        )
+        # Robust window close (works in all browsers)
+        return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_success"}, "*");window.close();setTimeout(function(){window.open("","_self");window.close();},100);</script>')

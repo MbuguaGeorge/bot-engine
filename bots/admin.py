@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Bot, WhatsAppBusinessAccount, Notification
+from .models import Bot, WhatsAppBusinessAccount, Notification, NotificationSettings
 
 @admin.register(Bot)
 class BotAdmin(admin.ModelAdmin):
@@ -20,3 +20,10 @@ class NotificationAdmin(admin.ModelAdmin):
     list_display = ('type', 'bot', 'title', 'message', 'is_read', 'created_at')
     search_fields = ('bot', 'user__email', 'type')
     list_filter = ('is_read', 'type', 'created_at')
+
+
+@admin.register(NotificationSettings)
+class NotificationSettingsAdmin(admin.ModelAdmin):
+    list_display = ("user", "updated_at", "inactivity_threshold_minutes")
+    search_fields = ("user__email",)
+    readonly_fields = ("user",)

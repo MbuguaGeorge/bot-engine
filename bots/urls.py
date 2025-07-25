@@ -11,6 +11,7 @@ from .views import (
     NotificationListView,
     NotificationMarkReadView,
     NotificationMarkAllReadView,
+    NotificationSettingsView,
 )
 
 app_name = 'bots'
@@ -24,8 +25,10 @@ urlpatterns = [
     path('bots/stats/', BotStatsView.as_view(), name='bot-stats'),
     path('meta/generate-signup-url/<int:bot_id>/', GenerateSignupURLView.as_view(), name='generate_signup_url'),
     path('meta/callback/', MetaCallbackView.as_view(), name='meta_callback'),
+    
     # Notification endpoints
     path('notifications/', NotificationListView.as_view(), name='notification-list'),
     path('notifications/<int:pk>/read/', NotificationMarkReadView.as_view(), name='notification-mark-read'),
     path('notifications/mark-all-read/', NotificationMarkAllReadView.as_view(), name='notification-mark-all-read'),
-] 
+    path('notification-settings/', NotificationSettingsView.as_view(), name='notification-settings'),
+]

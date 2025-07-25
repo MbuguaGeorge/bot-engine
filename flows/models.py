@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from bots.models import Bot
+from django.conf import settings
 
 class Flow(models.Model):
     STATUS_CHOICES = [
@@ -106,3 +107,29 @@ class Conversation(models.Model):
 
     def __str__(self):
         return f"Conversation {self.conversation_id} (Bot {self.bot_id}) Handoff: {self.handoff_active}"
+
+
+class GoogleOAuthToken(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='google_oauth_token')
+    access_token = models.TextField()
+    refresh_token = models.TextField()
+    expires_at = models.DateTimeField()
+    scope = models.TextField()
+    token_type = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Google OAuth Token'
+        verbose_name_plural = 'Google OAuth Tokens'
+
+class GoogleUserFile(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='google_user_files')
+    link = models.URLField()
+    file_id = models.CharField(max_length=128)
+    file_type = models.CharField(max_length=32)  # doc, sheet
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Google User File'
+        verbose_name_plural = 'Google User Files'

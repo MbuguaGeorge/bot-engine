@@ -7,6 +7,9 @@ from .views import (
     WhatsAppWebhookView,
     ConversationHandoffView,
     send_whatsapp_message,
+    GoogleOAuthDeviceCodeView, GoogleOAuthTokenPollView,
+    GoogleDocsLinkView, GoogleDocsListView,
+    GoogleOAuthURLView, GoogleOAuthCallbackView
 )
 
 app_name = 'flows'
@@ -19,4 +22,10 @@ urlpatterns = [
     path('webhook/whatsapp/', WhatsAppWebhookView.as_view(), name='whatsapp-webhook'),
     path('flows/handoff/', ConversationHandoffView.as_view(), name='conversation-handoff'),
     path('flows/send_whatsapp_message/', send_whatsapp_message, name='send-whatsapp-message'),
+    path('google-oauth/device/', GoogleOAuthDeviceCodeView.as_view(), name='google_oauth_device'),
+    path('google-oauth/token/', GoogleOAuthTokenPollView.as_view(), name='google_oauth_token'),
+    path('google-docs/link/', GoogleDocsLinkView.as_view(), name='google_docs_link'),
+    path('google-docs/list/', GoogleDocsListView.as_view(), name='google_docs_list'),
+    path('google-oauth/url/', GoogleOAuthURLView.as_view(), name='google_oauth_url'),
+    path('google-oauth/callback/', GoogleOAuthCallbackView.as_view(), name='google_oauth_callback'),
 ] 

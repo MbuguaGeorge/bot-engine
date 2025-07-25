@@ -5,12 +5,13 @@ from django.http import JsonResponse, HttpResponseRedirect
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
-from .models import Bot, WhatsAppBusinessAccount, Notification
+from .models import Bot, WhatsAppBusinessAccount, Notification, NotificationSettings
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from .serializers import BotSerializer, BotDetailSerializer
 from .serializers import WhatsAppBusinessAccountSerializer
 from rest_framework.pagination import PageNumberPagination
+from .serializers import NotificationSettingsSerializer
 
 # Create your views here.
 
@@ -335,3 +336,27 @@ class NotificationMarkAllReadView(APIView):
         for n in notifications:
             Notification.objects.publish_mark_read(n)
         return Response({'success': True})
+
+class NotificationSettingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        settings, _ = NotificationSettings.objects.get_or_create(user=request.user)
+        serializer = NotificationSettingsSerializer(settings)
+        return Response(serializer.data)
+
+    def put(self, request):
+        settings, _ = NotificationSettings.objects.get_or_create(user=request.user)
+        serializer = NotificationSettingsSerializer(settings, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request):
+        settings, _ = NotificationSettings.objects.get_or_create(user=request.user)
+        serializer = NotificationSettingsSerializer(settings, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

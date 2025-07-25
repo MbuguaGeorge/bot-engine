@@ -18,6 +18,7 @@ from .serializers import (
 )
 from .services import StripeService
 from django.conf import settings
+from bots.services import NotificationService
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -357,6 +358,12 @@ class StripeWebhookView(APIView):
             
             if created:
                 print(f"Successfully created subscription {subscription.id} for user {user.id}")
+                NotificationService.create_and_send(
+                    user=subscription.user,
+                    type="subscription_activated",
+                    title="Subscription Activated",
+                    message="Your subscription is now active.",
+                )
             else:
                 print(f"Subscription {subscription.id} already exists for user {user.id}")
             
@@ -402,6 +409,12 @@ class StripeWebhookView(APIView):
             try:
                 subscription = Subscription.objects.get(stripe_subscription_id=subscription_id)
                 print(f"Found subscription: {subscription.id} for user: {subscription.user.email}")
+                NotificationService.create_and_send(
+                    user=subscription.user,
+                    type="payment_success",
+                    title="Payment Successful",
+                    message="Your payment was processed successfully.",
+                )
             except Subscription.DoesNotExist:
                 print(f"Subscription {subscription_id} not found in database, getting from Stripe")
                 try:
@@ -445,6 +458,12 @@ class StripeWebhookView(APIView):
                     )
                     if created:
                         print(f"Created subscription {subscription.id} from Stripe data for invoice")
+                        NotificationService.create_and_send(
+                            user=subscription.user,
+                            type="subscription_activated",
+                            title="Subscription Activated",
+                            message="Your subscription is now active.",
+                        )
                     else:
                         print(f"Subscription {subscription.id} already exists from Stripe data")
                 except Exception as e:
@@ -492,6 +511,12 @@ class StripeWebhookView(APIView):
                     subscription = Subscription.objects.get(stripe_subscription_id=subscription_id)
                     subscription.status = 'past_due'
                     subscription.save()
+                    NotificationService.create_and_send(
+                        user=subscription.user,
+                        type="payment_failed",
+                        title="Payment Failed",
+                        message="A payment for your subscription failed. Please update your payment method.",
+                    )
                 except Subscription.DoesNotExist:
                     print(f"Subscription {subscription_id} not found in database, getting from Stripe")
                     try:
@@ -535,6 +560,12 @@ class StripeWebhookView(APIView):
                         )
                         if created:
                             print(f"Created subscription {subscription.id} from Stripe data for failed payment")
+                            NotificationService.create_and_send(
+                                user=subscription.user,
+                                type="payment_failed",
+                                title="Payment Failed",
+                                message="A payment for your subscription failed. Please update your payment method.",
+                            )
                         else:
                             subscription.status = 'past_due'
                             subscription.save()
@@ -596,6 +627,12 @@ class StripeWebhookView(APIView):
                     
                     if created:
                         print(f"Successfully created subscription {subscription.id} for user {user.id}")
+                        NotificationService.create_and_send(
+                            user=subscription.user,
+                            type="subscription_activated",
+                            title="Subscription Activated",
+                            message="Your subscription is now active.",
+                        )
                     else:
                         print(f"Subscription {subscription.id} already exists for user {user.id}")
                     
