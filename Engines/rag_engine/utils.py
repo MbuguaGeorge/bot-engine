@@ -14,31 +14,29 @@ from flows.models import GoogleOAuthToken, GoogleUserFile
 DOCS_SCOPES = ['https://www.googleapis.com/auth/documents.readonly']
 SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 
-
-def get_credentials(scopes, token_file='token.json', credentials_file='credentials.json'):
-    creds = None
-    if os.path.exists(token_file):
-        creds = Credentials.from_authorized_user_file(token_file, scopes)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, scopes)
-            creds = flow.run_local_server(port=0)
-        with open(token_file, 'w') as token:
-            token.write(creds.to_json())
-
+def get_user_google_credentials(user, scopes):
+    access_token = get_valid_access_token(user)
+    # Use the stored refresh token and access token
+    token_obj = GoogleOAuthToken.objects.get(user=user)
+    creds = Credentials(
+        token=token_obj.access_token,
+        refresh_token=token_obj.refresh_token,
+        token_uri='https://oauth2.googleapis.com/token',
+        client_id=settings.GOOGLE_CLIENT_ID,
+        client_secret=settings.GOOGLE_CLIENT_SECRET,
+        scopes=scopes,
+    )
+    # Optionally refresh if expired
+    if creds.expired and creds.refresh_token:
+        creds.refresh(requests.Request())
     return creds
 
 
-def fetch_google_doc_text(doc_id: str) -> str:
-    creds = get_credentials(DOCS_SCOPES)
+def fetch_google_doc_text(doc_id: str, user) -> str:
+    creds = get_user_google_credentials(user, DOCS_SCOPES)
     service = build('docs', 'v1', credentials=creds)
-
     try:
         doc = service.documents().get(documentId=doc_id).execute()
-
         content = []
         for element in doc.get("body", {}).get("content", []):
             text = extract_text_from_element(element)
@@ -49,21 +47,19 @@ def fetch_google_doc_text(doc_id: str) -> str:
         return f"[Error fetching Google Doc: {e}]"
     
 
-def fetch_google_sheet_text(sheet_id: str, range_str: str = 'Sheet1') -> str:
-    creds = get_credentials(SHEETS_SCOPES)
+def fetch_google_sheet_text(sheet_id: str, user, range_str: str = 'Sheet1') -> str:
+    creds = get_user_google_credentials(user, SHEETS_SCOPES)
     service = build('sheets', 'v4', credentials=creds)
-
     try:
         sheet = service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
             range=range_str
         ).execute()
-
         rows = sheet.get('values', [])
         return "\n".join([" | ".join(row) for row in rows])
     except Exception as e:
         return f"[Error fetching Google Sheet: {e}]"
-
+        
 
 def extract_text_from_element(element) -> str:
     text = ""
@@ -82,8 +78,6 @@ def fetch_pdf_text(file_path: str) -> str:
         return text.strip()
     except Exception as e:
         return f"[Error extracting PDF text: {e}]"
-
-# --- Models ---
 
 
 # --- Service Functions ---
@@ -108,7 +102,7 @@ def get_google_oauth_url():
     }
     resp = requests.post(GOOGLE_OAUTH_DEVICE_CODE_URL, data=data)
     resp.raise_for_status()
-    return resp.json()  # Contains device_code, user_code, verification_url, expires_in, interval
+    return resp.json()
 
 def poll_for_token(device_code):
     data = {

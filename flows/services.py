@@ -142,12 +142,17 @@ class FlowExecutionService:
         Returns:
             List of responses to send back to the user
         """
+        gdrive_links = []
+        for node in flow.flow_data.get("nodes", []):
+            node_data = node.get("data", {})
+            gdrive_links.extend(node_data.get("gdrive_links", []))
+
         try:
             context = {
                 "flow_id": flow.id,
                 "bot_id": flow.bot.id,
                 "files": list(flow.uploaded_files.values_list('id', flat=True)),
-                "gdrive_links": flow.flow_data.get("gdrive_links", []),
+                "gdrive_links": gdrive_links,
                 "user_id": flow.bot.user.id,
             }
             

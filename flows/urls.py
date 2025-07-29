@@ -9,7 +9,8 @@ from .views import (
     send_whatsapp_message,
     GoogleOAuthDeviceCodeView, GoogleOAuthTokenPollView,
     GoogleDocsLinkView, GoogleDocsListView,
-    GoogleOAuthURLView, GoogleOAuthCallbackView
+    GoogleOAuthURLView, GoogleOAuthCallbackView,
+    GoogleOAuthStatusView, UpsertGDriveLinkView
 )
 
 app_name = 'flows'
@@ -28,4 +29,6 @@ urlpatterns = [
     path('google-docs/list/', GoogleDocsListView.as_view(), name='google_docs_list'),
     path('google-oauth/url/', GoogleOAuthURLView.as_view(), name='google_oauth_url'),
     path('google-oauth/callback/', GoogleOAuthCallbackView.as_view(), name='google_oauth_callback'),
+    path('google-oauth/status/', GoogleOAuthStatusView.as_view(), name='google_oauth_status'),
+    path('upsert-gdrive-link/', UpsertGDriveLinkView.as_view(), name='upsert_gdrive_link'),
 ] 

@@ -64,7 +64,7 @@ class RAGEngine:
                 "user_id": self.context.get("user_id"),
                 "bot_id": self.context.get("bot_id"),
                 "flow_id": self.context.get("flow_id"),
-                "link": link
+                "link": str(link)
             }
             docs = self.vector_utils.query(query=query, filter=metadata_filter)
             results.extend(docs)

@@ -15,7 +15,7 @@ import logging
 from .services import FlowExecutionService
 from .whatsapp import WhatsAppClient
 from .serializers import UploadedFileSerializer
-from Engines.rag_engine.tasks import upsert_pdf_to_pinecone, delete_pdf_from_pinecone
+from Engines.rag_engine.tasks import upsert_pdf_to_pinecone, delete_pdf_from_pinecone, upsert_gdrive_links_to_pinecone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from .whatsapp import WhatsAppClient
@@ -30,6 +30,8 @@ from django.shortcuts import redirect
 from django.http import HttpResponse
 from urllib.parse import urlencode
 import requests
+from flows.models import GoogleOAuthToken
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +336,7 @@ class GoogleOAuthURLView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         # redirect_uri = request.build_absolute_uri('/api/google-oauth/callback/')
-        redirect_uri = 'https://39bed5907a80.ngrok-free.app/api/google-oauth/callback/'
+        redirect_uri = 'https://151e6095e0a2.ngrok-free.app/api/google-oauth/callback/'
         params = {
             'client_id': settings.GOOGLE_CLIENT_ID,
             'redirect_uri': redirect_uri,
@@ -362,7 +364,7 @@ class GoogleOAuthCallbackView(APIView):
         if not code or not state:
             return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"Missing code or state"}, "*");window.close();</script>')
         # Exchange code for tokens
-        redirect_uri = 'https://39bed5907a80.ngrok-free.app/api/google-oauth/callback/'
+        redirect_uri = 'https://151e6095e0a2.ngrok-free.app/api/google-oauth/callback/'
         data = {
             'code': code,
             'client_id': settings.GOOGLE_CLIENT_ID,
@@ -375,8 +377,6 @@ class GoogleOAuthCallbackView(APIView):
             return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"Token exchange failed"}, "*");window.close();</script>')
         token_data = token_resp.json()
         # Save all relevant info to GoogleOAuthToken
-        from flows.models import GoogleOAuthToken
-        from django.utils import timezone
         import datetime
         from django.contrib.auth import get_user_model
         User = get_user_model()
@@ -396,5 +396,70 @@ class GoogleOAuthCallbackView(APIView):
                 'token_type': token_data.get('token_type', ''),
             }
         )
-        # Robust window close (works in all browsers)
-        return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_success"}, "*");window.close();setTimeout(function(){window.open("","_self");window.close();},100);</script>')
+        return HttpResponse("""
+            <script>
+            try {
+                window.opener.postMessage({type:"google_oauth_success"}, "*");
+            } catch(e) {}
+            window.close();
+            setTimeout(function() {
+                window.open("about:blank", "_self");
+                window.close();
+            }, 200);
+            </script>
+        """)
+
+
+class GoogleOAuthStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            token_obj = GoogleOAuthToken.objects.get(user=request.user)
+        except GoogleOAuthToken.DoesNotExist:
+            return Response({'authorized': False, 'token': None})
+
+        # Check if token is expired
+        if token_obj.expires_at <= timezone.now():
+            # Try to refresh the token
+            refresh_data = {
+                'client_id': settings.GOOGLE_CLIENT_ID,
+                'client_secret': settings.GOOGLE_CLIENT_SECRET,
+                'refresh_token': token_obj.refresh_token,
+                'grant_type': 'refresh_token',
+            }
+            resp = requests.post('https://oauth2.googleapis.com/token', data=refresh_data)
+            if resp.status_code == 200:
+                token_data = resp.json()
+                token_obj.access_token = token_data.get('access_token', '')
+                expires_in = token_data.get('expires_in', 3600)
+                token_obj.expires_at = timezone.now() + timezone.timedelta(seconds=expires_in)
+                token_obj.save()
+            else:
+                return Response({'authorized': False, 'token': None, 'error': 'Failed to refresh token'})
+
+        return Response({
+            'authorized': True,
+            'token': {
+                'access_token': token_obj.access_token,
+                'expires_at': token_obj.expires_at,
+                'scope': token_obj.scope,
+                'token_type': token_obj.token_type,
+            }
+        })
+
+
+class UpsertGDriveLinkView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        link = request.data.get('link')
+        flow_id = request.data.get('flow_id')
+        if not link or not flow_id:
+            return Response({'error': 'Missing link or flow_id'}, status=400)
+        try:
+            flow = Flow.objects.get(id=flow_id)
+        except Flow.DoesNotExist:
+            return Response({'error': 'Flow not found'}, status=404)
+        upsert_gdrive_links_to_pinecone(request.user, flow.id, link)
+        return Response({'status': 'upsert triggered'})

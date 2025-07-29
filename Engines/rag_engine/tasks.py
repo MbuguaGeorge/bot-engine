@@ -41,6 +41,7 @@ def upsert_pdf_to_pinecone(file_id, user_id, bot_id, flow_id, node_id):
         logger.error(f"Error in upsert_file_to_pinecone: {e}")
         raise e
 
+
 @shared_task
 def delete_pdf_from_pinecone(file_id, user_id, bot_id, flow_id, node_id):
     filter_metadata = {
@@ -59,40 +60,37 @@ def delete_pdf_from_pinecone(file_id, user_id, bot_id, flow_id, node_id):
         raise e
 
 
-@shared_task
-def upsert_gdrive_links_to_pinecone():
-    for flow in Flow.objects.all():
-        gdrive_links = flow.flow_data.get('gdrive_links', [])
-        for link in gdrive_links:
-            # Determine type
-            if 'docs.google.com/document' in link:
-                doc_type = 'doc'
-                doc_id = link.split('/d/')[1].split('/')[0]
-                text = fetch_google_doc_text(doc_id)
-            elif 'docs.google.com/spreadsheets' in link:
-                doc_type = 'sheet'
-                sheet_id = link.split('/d/')[1].split('/')[0]
-                text = fetch_google_sheet_text(sheet_id)
-            else:
-                continue
+def upsert_gdrive_links_to_pinecone(user, flow_id, link):
+    logger.info(f"Running upsert_gdrive_links_to_pinecone for flow_id={flow_id}, link={link}")
+    flow = Flow.objects.get(id=flow_id)
+    if 'docs.google.com/document' in link:
+        doc_id = link.split('/d/')[1].split('/')[0]
+        text = fetch_google_doc_text(doc_id, user)
+    elif 'docs.google.com/spreadsheets' in link:
+        sheet_id = link.split('/d/')[1].split('/')[0]
+        text = fetch_google_sheet_text(sheet_id, user)
+    else:
+        return
 
-            content_hash = compute_hash(text)
-            cache, _ = GoogleDocCache.objects.get_or_create(link=link, flow=flow)
-            if cache.last_hash != content_hash:
-                # Upsert to Pinecone
-                vector_utils = VectorStoreUtils(
-                    index_name=settings.PINECONE_INDEX_NAME,
-                    api_key=settings.PINECONE_API_KEY,
-                )
-                metadata = {
-                    'user_id': flow.bot.user.id,
-                    'bot_id': flow.bot.id,
-                    'flow_id': flow.id,
-                    'link': link
-                }
-                vector_utils.upsert_documents(text, metadata)
-                cache.last_hash = content_hash
-                cache.save()
+    content_hash = compute_hash(text)
+    cache, _ = GoogleDocCache.objects.get_or_create(link=link, flow=flow)
+    if cache.last_hash != content_hash:
+        vector_utils = VectorStoreUtils(
+            index_name=settings.PINECONE_INDEX_NAME,
+            api_key=settings.PINECONE_API_KEY,
+        )
+        metadata = {
+            'user_id': flow.bot.user.id,
+            'bot_id': flow.bot.id,
+            'flow_id': flow.id,
+            'link': link
+        }
+        try:
+            vector_utils.upsert_documents(text, metadata)
+            cache.last_hash = content_hash
+            cache.save()
+        except Exception as e:
+            logger.error(f"Pinecone upsert error: {e}") 
 
 # Register periodic task
 app.conf.beat_schedule = {
