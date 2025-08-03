@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="greeting">Your trial is ending soon</div>
+
+<div class="message">
+    Hi {{ user_name }}, your free trial will end on {{ trial_end_date }}. We hope you've been enjoying Wozza and seeing the benefits of automated WhatsApp communication!
+</div>
+
+<div class="highlight-box">
+    <h3 style="margin-bottom: 15px; color: #1a202c;">What you've accomplished</h3>
+    <ul style="margin-left: 20px; color: #4a5568;">
+        <li>Created {{ bot_count }} bot(s)</li>
+        <li>Built {{ flow_count }} automation flow(s)</li>
+        <li>Engaged with {{ message_count }} customer messages</li>
+        <li>Saved countless hours of manual responses</li>
+    </ul>
+</div>
+
+<div class="message">
+    Don't lose momentum! Upgrade to a paid plan to continue automating your WhatsApp business communications and scale your customer engagement.
+</div>
+
+<div style="text-align: center; margin: 30px 0;">
+    <a href="{{ upgrade_url }}" class="cta-button">Upgrade Now</a>
+</div>
+
+<div class="message">
+    <strong>Choose the perfect plan for your business:</strong>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li><strong>Basic:</strong> Perfect for small businesses starting with automation</li>
+        <li><strong>Professional:</strong> Advanced features for growing businesses</li>
+        <li><strong>Enterprise:</strong> Custom solutions for large organizations</li>
+    </ul>
+</div>
+
+<div class="divider"></div>
+
+<div class="message">
+    <strong>Need help choosing?</strong> Our team is here to help you find the perfect plan for your business needs. Just reply to this email or contact our support team.
+</div>
+{% endblock %} 

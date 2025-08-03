@@ -8,6 +8,10 @@ from django.contrib.auth import get_user_model, authenticate, update_session_aut
 from django.utils import timezone
 from .serializers import UserSerializer
 from bots.services import NotificationService, NOTIFICATION_EVENT_TYPES
+from email_templates.email_service import EmailService
+import logging
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -17,10 +21,39 @@ class SignUpView(APIView):
     def post(self, request):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
+            # First, validate the email by attempting to send a test email
+            user_data = serializer.validated_data
+            test_email = user_data.get('email')
+            
+            # Test email sending before creating user
+            email_service = EmailService()
+            if EmailService:
+                try:
+                    # Validate email address by attempting to send a test email
+                    email_valid = email_service.validate_email_address(test_email)
+                    if not email_valid:
+                        logger.error(f"Email validation failed for {test_email} - preventing user creation")
+                        return Response({
+                            'error': 'Unable to send welcome email. Please check your email address and try again.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    
+                    logger.info(f"Email validation successful for {test_email}, proceeding with user creation")
+                except Exception as e:
+                    logger.error(f"Exception during email validation for {test_email}: {str(e)}")
+                    return Response({
+                        'error': 'Unable to send welcome email. Please check your email address and try again.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                logger.error("Email service not available - preventing user creation")
+                return Response({
+                    'error': 'Email service is currently unavailable. Please try again later.'
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            # If email test passes, create the user
             user = serializer.save()
             refresh = RefreshToken.for_user(user)
 
-            # Start 7-day trial subscription
+            # Start 14-day trial subscription
             from subscription.models import Subscription
             from datetime import timedelta
             if not Subscription.objects.filter(user=user).exists():
@@ -31,10 +64,23 @@ class SignUpView(APIView):
                     stripe_customer_id=f"trial_{user.id}",
                     status='trialing',
                     current_period_start=timezone.now(),
-                    current_period_end=timezone.now() + timedelta(days=7),
+                    current_period_end=timezone.now() + timedelta(days=14),
                     trial_start=timezone.now(),
-                    trial_end=timezone.now() + timedelta(days=7),
+                    trial_end=timezone.now() + timedelta(days=14),
                 )
+
+            # Send welcome email (should succeed since we tested it)
+            if EmailService:
+                try:
+                    success = email_service.send_welcome_email(user)
+                    if success:
+                        logger.info(f"Welcome email sent successfully to {user.email}")
+                    else:
+                        logger.error(f"Failed to send welcome email to {user.email} after user creation")
+                except Exception as e:
+                    logger.error(f"Exception sending welcome email to {user.email}: {str(e)}")
+            else:
+                logger.error("Email service not available - welcome email not sent")
 
             return Response({
                 'token': str(refresh.access_token),

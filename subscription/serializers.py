@@ -1,12 +1,18 @@
 from rest_framework import serializers
-from .models import SubscriptionPlan, Subscription, PaymentMethod, Invoice
+from .models import SubscriptionPlan, Subscription, PaymentMethod, Invoice, AIModel, UserCreditBalance, CreditUsageLog
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
+    features = serializers.SerializerMethodField()
+    
+    def get_features(self, obj):
+        return obj.get_features_dict()
+    
     class Meta:
         model = SubscriptionPlan
         fields = [
             'id', 'name', 'plan_type', 'stripe_price_id', 'price', 
-            'currency', 'interval', 'trial_days', 'features', 'is_active'
+            'currency', 'interval', 'trial_days', 'features', 'is_active',
+            'credits_per_month'
         ]
 
 class PaymentMethodSerializer(serializers.ModelSerializer):
@@ -85,3 +91,47 @@ class CancelSubscriptionSerializer(serializers.Serializer):
 
 class UpdatePaymentMethodSerializer(serializers.Serializer):
     payment_method_id = serializers.CharField() 
+
+# Credit System Serializers
+class AIModelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AIModel
+        fields = [
+            'id', 'name', 'provider', 'display_name', 'is_active',
+            'cost_per_1k_tokens', 'credit_conversion_rate', 'created_at'
+        ]
+
+class UserCreditBalanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserCreditBalance
+        fields = [
+            'id', 'credits_remaining', 'credits_used_this_period',
+            'credits_reset_date', 'created_at', 'updated_at'
+        ]
+
+class CreditUsageLogSerializer(serializers.ModelSerializer):
+    model_name = serializers.CharField(source='model.display_name', read_only=True)
+    model_provider = serializers.CharField(source='model.provider', read_only=True)
+    
+    class Meta:
+        model = CreditUsageLog
+        fields = [
+            'id', 'model', 'model_name', 'model_provider', 'bot',
+            'input_tokens', 'output_tokens', 'cost_usd', 'credits_deducted',
+            'request_id', 'created_at'
+        ]
+        read_only_fields = ['id', 'cost_usd', 'credits_deducted', 'created_at']
+
+class CreditUsageRequestSerializer(serializers.Serializer):
+    """Serializer for credit usage requests"""
+    model_name = serializers.CharField()
+    input_tokens = serializers.IntegerField()
+    output_tokens = serializers.IntegerField()
+    bot_id = serializers.IntegerField(required=False)
+    request_id = serializers.CharField(required=False)
+
+class AdminCreditAdjustmentSerializer(serializers.Serializer):
+    """Serializer for admin credit adjustments"""
+    user_id = serializers.IntegerField()
+    credits_to_add = serializers.IntegerField()
+    reason = serializers.CharField(required=False) 

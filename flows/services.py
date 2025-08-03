@@ -6,6 +6,7 @@ import logging
 import json
 import redis
 from django.conf import settings
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,8 @@ class FlowExecutionService:
             }
             redis_client = get_redis_client()
             try:
-                redis_client.publish('chat_message', json.dumps(message_data))
+                # Fix: Use the correct channel name that Node.js is listening to
+                redis_client.publish(f'chat_message_{bot_id}', json.dumps(message_data))
                 logger.info(f"Published chat message to Redis: {conversation_id} - {sender}: {content[:50]}...")
             except Exception as re:
                 logger.error(f"Redis publish error: {re}")
@@ -162,11 +164,59 @@ class FlowExecutionService:
                 context=context
             )
             
-            return engine.run()
+            responses = engine.run()
+            
+            # Check if any AI nodes were used and deduct credits
+            self._deduct_credits_for_ai_usage(engine, flow.bot.user)
+            
+            return responses
             
         except Exception as e:
             logger.error(f"Error executing flow {flow.id}: {str(e)}")
             return ["I apologize, but I'm having trouble processing your request right now."]
+    
+    def _deduct_credits_for_ai_usage(self, engine: 'FlowEngine', user) -> None:
+        """Deduct credits for AI usage in the flow"""
+        try:
+            from subscription.services import CreditService
+            
+            # Collect all token usage from AI nodes
+            total_input_tokens = 0
+            total_output_tokens = 0
+            model_name = None
+            
+            # Check variables for token usage (set by AI nodes)
+            for var_name, var_value in engine.variables.items():
+                if var_name == "token_usage" and isinstance(var_value, dict):
+                    total_input_tokens += var_value.get("input_tokens", 0)
+                    total_output_tokens += var_value.get("output_tokens", 0)
+                    model_name = var_value.get("model", "gpt-4o")
+                    break
+            
+            # If we have token usage, deduct credits
+            if total_input_tokens > 0 or total_output_tokens > 0:
+                try:
+                    deduction_result = CreditService.deduct_credits(
+                        user=user,
+                        model_name=model_name or "gpt-4o",
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        bot_id=engine.context.get("bot_id"),
+                        request_id=f"flow_{engine.context.get('flow_id')}_{int(time.time())}"
+                    )
+                    
+                    logger.info(f"Credits deducted for flow execution: {deduction_result['credits_deducted']} credits")
+                    
+                except ValueError as e:
+                    logger.warning(f"Insufficient credits for user {user.email}: {e}")
+                    # You might want to handle insufficient credits differently
+                    pass
+                except Exception as e:
+                    logger.error(f"Error deducting credits: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error in credit deduction: {e}")
+            # Don't fail the flow execution if credit deduction fails
     
     def _extract_phone_number_id(self, webhook_data: Dict[str, Any]) -> Optional[str]:
         """Extract phone number from webhook data"""

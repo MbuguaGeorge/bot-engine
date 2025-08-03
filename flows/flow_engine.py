@@ -144,13 +144,38 @@ class FlowEngine:
         """Handle AI response node"""
         try:
             rag_engine = RAGEngine(node, self.context)
-            response = rag_engine.run(self.user_input)
+            result = rag_engine.run(self.user_input)
+            
+            # Extract the response content
+            response = result.get("response", "")
+            
+            # Log token usage for credit tracking
+            token_usage = result.get("token_usage", {})
+            cost_estimate = result.get("cost_estimate", {})
+            
+            if token_usage and cost_estimate:
+                logger.info(f"AI Node Usage - Model: {token_usage.get('model', 'unknown')}, "
+                           f"Input tokens: {token_usage.get('input_tokens', 0)}, "
+                           f"Output tokens: {token_usage.get('output_tokens', 0)}, "
+                           f"Cost: ${cost_estimate.get('total_cost_usd', 0):.6f}")
+            
+            # Store usage information in variables for potential credit deduction
+            variables = {
+                "ai_response": response,
+                "token_usage": token_usage,
+                "cost_estimate": cost_estimate,
+                "model": token_usage.get("model", "unknown"),
+                "input_tokens": token_usage.get("input_tokens", 0),
+                "output_tokens": token_usage.get("output_tokens", 0),
+                "total_tokens": token_usage.get("total_tokens", 0),
+                "cost_usd": cost_estimate.get("total_cost_usd", 0)
+            }
 
             next_id = self.get_next_node_id(node["id"])
             return NodeResponse(
                 responses=[response],
                 next_node_id=next_id,
-                variables={"ai_response": response}
+                variables=variables
             )
         
         except Exception as e:

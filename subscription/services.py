@@ -1,8 +1,13 @@
 import stripe
-from django.utils import timezone
-from datetime import datetime, timedelta, timezone as dt_timezone
-from .models import Subscription, SubscriptionPlan, PaymentMethod, Invoice
 from django.conf import settings
+from django.utils import timezone
+from datetime import timedelta
+import logging
+from django.db import models
+from datetime import datetime, timezone as dt_timezone
+from .models import Invoice
+
+logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -296,3 +301,290 @@ class StripeService:
             
         except stripe.error.StripeError as e:
             raise Exception(f"Failed to get invoice history: {str(e)}") 
+
+# Credit System Service
+class CreditService:
+    @staticmethod
+    def get_or_create_credit_balance(user):
+        """Get or create credit balance for user"""
+        from .models import UserCreditBalance
+        
+        balance, created = UserCreditBalance.objects.get_or_create(
+            user=user,
+            defaults={
+                'credits_remaining': 0,
+                'credits_used_this_period': 0,
+                'credits_reset_date': timezone.now() + timedelta(days=30),
+                'is_trial_user': False,
+                'trial_credits_allocated': False
+            }
+        )
+        return balance
+    
+    @staticmethod
+    def allocate_trial_credits(user):
+        """Allocate trial credits for new users"""
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        if not balance.trial_credits_allocated:
+            balance.credits_remaining = 500  # Trial credit limit
+            balance.credits_used_this_period = 0
+            balance.is_trial_user = True
+            balance.trial_credits_allocated = True
+            balance.credits_reset_date = timezone.now() + timedelta(days=14)  # 14-day trial
+            balance.save()
+            
+            logger.info(f"Trial credits allocated for user {user.email}: 500 credits")
+        
+        return balance
+    
+    @staticmethod
+    def check_trial_expiry(user):
+        """Check if trial has expired and reset credits if needed"""
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        if balance.is_trial_user and balance.credits_reset_date and timezone.now() > balance.credits_reset_date:
+            # Trial has expired, reset credits to 0
+            balance.reset_trial_credits()
+            return True
+        
+        return False
+    
+    @staticmethod
+    def is_trial_user(user):
+        """Check if user is in trial period"""
+        balance = CreditService.get_or_create_credit_balance(user)
+        return balance.is_trial_user and not CreditService.check_trial_expiry(user)
+    
+    @staticmethod
+    def get_trial_model_restrictions():
+        """Get model restrictions for trial users"""
+        return {
+            'allowed_models': ['gpt-4o-mini'],
+            'restricted_models': ['gpt-4o', 'claude-3-sonnet', 'claude-3-haiku', 'claude-3-opus', 'gemini-pro', 'gemini-pro-vision']
+        }
+    
+    @staticmethod
+    def get_ai_model(model_name):
+        """Get AI model by name"""
+        from .models import AIModel
+        
+        try:
+            return AIModel.objects.get(name=model_name, is_active=True)
+        except AIModel.DoesNotExist:
+            return None
+    
+    @staticmethod
+    def calculate_credits_needed(model_name, input_tokens, output_tokens):
+        """Calculate credits needed for a request"""
+        model = CreditService.get_ai_model(model_name)
+        if not model:
+            raise ValueError(f"AI model '{model_name}' not found or inactive")
+        
+        return model.calculate_credits(input_tokens, output_tokens)
+    
+    @staticmethod
+    def deduct_credits(user, model_name, input_tokens, output_tokens, bot_id=None, request_id=None):
+        """Deduct credits for a request"""
+        from .models import CreditUsageLog
+        
+        # Check if user is in trial and validate model restrictions
+        if CreditService.is_trial_user(user):
+            trial_restrictions = CreditService.get_trial_model_restrictions()
+            if model_name not in trial_restrictions['allowed_models']:
+                raise ValueError(f"Model '{model_name}' is not available during trial. Only {', '.join(trial_restrictions['allowed_models'])} is allowed.")
+        
+        # Get or create credit balance
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        # Get AI model
+        model = CreditService.get_ai_model(model_name)
+        if not model:
+            raise ValueError(f"AI model '{model_name}' not found or inactive")
+        
+        # Calculate credits needed
+        credits_needed = model.calculate_credits(input_tokens, output_tokens)
+        
+        # Check if user has sufficient credits
+        if not balance.has_sufficient_credits(credits_needed):
+            raise ValueError(f"Insufficient credits. Required: {credits_needed}, Available: {balance.credits_remaining}")
+        
+        # Calculate cost in USD
+        from decimal import Decimal
+        
+        # Convert to Decimal for precise calculations
+        input_tokens_decimal = Decimal(str(input_tokens))
+        output_tokens_decimal = Decimal(str(output_tokens))
+        
+        cost_usd = (
+            (input_tokens_decimal / Decimal('1000')) * model.cost_per_1k_tokens +
+            (output_tokens_decimal / Decimal('1000')) * model.cost_per_1k_tokens
+        )
+        
+        # Deduct credits
+        if not balance.deduct_credits(credits_needed):
+            raise ValueError("Failed to deduct credits")
+        
+        # Log the usage
+        usage_log = CreditUsageLog.objects.create(
+            user=user,
+            model=model,
+            bot_id=bot_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+            credits_deducted=credits_needed,
+            request_id=request_id
+        )
+        
+        logger.info(f"Credits deducted for user {user.email}: {credits_needed} credits for {model_name}")
+        
+        return {
+            'credits_deducted': credits_needed,
+            'credits_remaining': balance.credits_remaining,
+            'cost_usd': cost_usd,
+            'usage_log_id': usage_log.id
+        }
+    
+    @staticmethod
+    def add_credits(user, credits_to_add, reason=None):
+        """Add credits to user balance (admin function)"""
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        if balance.add_credits(credits_to_add):
+            logger.info(f"Credits added for user {user.email}: {credits_to_add} credits. Reason: {reason}")
+            return True
+        return False
+    
+    @staticmethod
+    def get_usage_summary(user):
+        """Get credit usage summary for user"""
+        from .models import CreditUsageLog
+        
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        # Get usage by model
+        usage_by_model = CreditUsageLog.objects.filter(user=user).values(
+            'model__display_name', 'model__provider'
+        ).annotate(
+            total_credits=models.Sum('credits_deducted'),
+            total_cost=models.Sum('cost_usd'),
+            request_count=models.Count('id')
+        )
+        
+        return {
+            'credits_remaining': balance.credits_remaining,
+            'credits_used_this_period': balance.credits_used_this_period,
+            'credits_reset_date': balance.credits_reset_date,
+            'usage_by_model': list(usage_by_model)
+        }
+    
+    @staticmethod
+    def reset_credits_for_billing_cycle(user, subscription):
+        """Reset credits for new billing cycle"""
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        # Get credits from subscription plan
+        if subscription.plan:
+            # Use the new credits_per_month field
+            credits_allocation = subscription.plan.credits_per_month
+        else:
+            # Trial period
+            credits_allocation = 100  # Trial credits
+        
+        balance.credits_remaining = credits_allocation
+        balance.credits_used_this_period = 0
+        balance.credits_reset_date = subscription.current_period_end
+        balance.save()
+        
+        logger.info(f"Credits reset for user {user.email}: {credits_allocation} credits")
+        return balance
+    
+    @staticmethod
+    def is_billing_cycle_renewal(subscription, invoice_data):
+        """Check if this payment is for a billing cycle renewal vs new subscription"""
+        try:
+            # Check if this is the first invoice for this subscription
+            existing_invoices = Invoice.objects.filter(subscription=subscription).count()
+            
+            # If this is the first invoice, it's a new subscription, not a renewal
+            if existing_invoices == 0:
+                return False
+            
+            # Check if the invoice period matches the subscription's current period
+            invoice_period_start = datetime.fromtimestamp(invoice_data.get('period_start', 0), tz=dt_timezone.utc)
+            invoice_period_end = datetime.fromtimestamp(invoice_data.get('period_end', 0), tz=dt_timezone.utc)
+            
+            # If invoice period matches subscription period, it's a renewal
+            if (invoice_period_start == subscription.current_period_start and 
+                invoice_period_end == subscription.current_period_end):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking billing cycle renewal: {e}")
+            return False
+    
+    @staticmethod
+    def allocate_credits_for_new_subscription(user, subscription):
+        """Allocate credits immediately when subscription is created"""
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        # Get credits from subscription plan
+        if subscription.plan:
+            credits_allocation = subscription.plan.credits_per_month
+        else:
+            # Trial period
+            credits_allocation = 100  # Trial credits
+        
+        balance.credits_remaining = credits_allocation
+        balance.credits_used_this_period = 0
+        balance.credits_reset_date = subscription.current_period_end
+        balance.save()
+        
+        logger.info(f"Credits allocated for new subscription - user {user.email}: {credits_allocation} credits")
+        return balance
+    
+    @staticmethod
+    def prorate_credits_for_upgrade(user, old_subscription, new_plan):
+        """Prorate credits when upgrading/downgrading subscription"""
+        balance = CreditService.get_or_create_credit_balance(user)
+        
+        # If user was in trial, no proration - start fresh
+        if balance.is_trial_user:
+            # Reset trial status and allocate full credits for new plan
+            balance.is_trial_user = False
+            balance.credits_remaining = new_plan.credits_per_month
+            balance.credits_used_this_period = 0
+            balance.credits_reset_date = old_subscription.current_period_end
+            balance.save()
+            
+            logger.info(f"Trial user upgraded - fresh start with {new_plan.credits_per_month} credits for user {user.email}")
+            return balance
+        
+        # Calculate remaining time in current billing cycle
+        now = timezone.now()
+        time_remaining = old_subscription.current_period_end - now
+        total_period = old_subscription.current_period_end - old_subscription.current_period_start
+        remaining_ratio = max(0, time_remaining.total_seconds() / total_period.total_seconds())
+        
+        # Calculate prorated credits for new plan
+        new_plan_credits = new_plan.credits_per_month
+        prorated_new_credits = int(new_plan_credits * remaining_ratio)
+        
+        # Calculate prorated credits for old plan
+        old_plan_credits = old_subscription.plan.credits_per_month if old_subscription.plan else 100
+        prorated_old_credits = int(old_plan_credits * remaining_ratio)
+        
+        # Calculate credit difference
+        credit_difference = prorated_new_credits - prorated_old_credits
+        
+        # Add the difference to current balance
+        if credit_difference != 0:
+            balance.credits_remaining = max(0, balance.credits_remaining + credit_difference)
+            balance.save()
+            
+            logger.info(f"Credits prorated for upgrade - user {user.email}: {credit_difference} credits added (new: {prorated_new_credits}, old: {prorated_old_credits})")
+        
+        return balance 

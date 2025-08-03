@@ -3,30 +3,13 @@ from django.conf import settings as django_settings
 from celery import shared_task
 from django.utils import timezone
 from datetime import timedelta
-import sendgrid
-from sendgrid.helpers.mail import Mail, Email, To, Content
 from .models import Notification, NotificationSettings
 from django.contrib.auth import get_user_model
 from .notification_types import NOTIFICATION_EVENT_TYPES
+from email_templates.email_service import EmailService
+import logging
 
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
-
-def sendgrid_email(to_email, subject, message):
-    if not SENDGRID_API_KEY:
-        raise Exception("SENDGRID_API_KEY not set in environment")
-    sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
-    from_email = django_settings.DEFAULT_FROM_EMAIL or "no-reply@flowbotic.com"
-    mail = Mail(
-        from_email=Email(from_email),
-        to_emails=To(to_email),
-        subject=subject,
-        plain_text_content=Content("text/plain", message),
-    )
-    try:
-        sg.send(mail)
-    except Exception as e:
-        # Optionally log error
-        pass
+logger = logging.getLogger(__name__)
 
 class NotificationService:
     @staticmethod
@@ -77,7 +60,30 @@ class NotificationService:
     def send_notification_email(user_id, type, title, message, data=None):
         User = get_user_model()
         user = User.objects.get(id=user_id)
-        sendgrid_email(user.email, subject=title, message=message)
+        
+        # Get bot name if available
+        bot_name = None
+        if data and 'bot_id' in data:
+            try:
+                from .models import Bot
+                bot = Bot.objects.get(id=data['bot_id'])
+                bot_name = bot.name
+            except Bot.DoesNotExist:
+                pass
+        
+        # Send email using MailerSend
+        email_service = EmailService()
+        if email_service:
+            try:
+                success = email_service.send_notification_email(user.email, title, message, bot_name)
+                if success:
+                    logger.info(f"Notification email sent successfully to {user.email}")
+                else:
+                    logger.error(f"Failed to send notification email to {user.email}")
+            except Exception as e:
+                logger.error(f"Exception sending notification email to {user.email}: {str(e)}")
+        else:
+            logger.error("Email service not available - notification email not sent")
 
     @staticmethod
     @shared_task
@@ -102,6 +108,9 @@ class NotificationService:
     @staticmethod
     @shared_task
     def send_summaries_to_inactive_users():
+        """Send summary emails to users who haven't logged in recently"""
         User = get_user_model()
-        for user in User.objects.filter(is_active=True):
+        users = User.objects.filter(is_active=True)
+        
+        for user in users:
             NotificationService.send_summary_email.delay(user.id)

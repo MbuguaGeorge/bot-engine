@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="greeting">Payment successful! 🎉</div>
+
+<div class="message">
+    Hi {{ user_name }}, thank you for your payment! Your {{ plan_name }} subscription has been successfully processed.
+</div>
+
+<div class="success-box">
+    <h3 style="margin-bottom: 15px; color: #166534;">Payment Details</h3>
+    <ul style="margin-left: 20px; color: #166534;">
+        <li><strong>Amount:</strong> {{ amount }}</li>
+        <li><strong>Plan:</strong> {{ plan_name }}</li>
+        <li><strong>Next billing date:</strong> {{ next_billing_date }}</li>
+        <li><strong>Transaction ID:</strong> {{ transaction_id }}</li>
+    </ul>
+</div>
+
+<div class="message">
+    Your subscription is now active and all your WhatsApp automation features are ready to use. Keep building amazing customer experiences!
+</div>
+
+<div style="text-align: center; margin: 30px 0;">
+    <a href="{{ dashboard_url }}" class="cta-button">Continue Building</a>
+</div>
+
+<div class="message">
+    <strong>What's included in your {{ plan_name }} plan:</strong>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li>Unlimited bots and flows</li>
+        <li>Advanced AI features</li>
+        <li>Priority customer support</li>
+        <li>Advanced analytics and reporting</li>
+        <li>Custom integrations</li>
+    </ul>
+</div>
+
+<div class="divider"></div>
+
+<div class="message">
+    <strong>Need help?</strong> Our support team is available 24/7 to help you make the most of your Wozza subscription.
+</div>
+{% endblock %} 

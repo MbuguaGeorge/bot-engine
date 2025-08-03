@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="greeting">Payment failed</div>
+
+<div class="message">
+    Hi {{ user_name }}, we were unable to process your payment for your {{ plan_name }} subscription.
+</div>
+
+<div class="warning-box">
+    <h3 style="margin-bottom: 15px; color: #92400e;">What happened?</h3>
+    <p style="color: #92400e; margin-bottom: 10px;">Your payment method was declined or expired. This could be due to:</p>
+    <ul style="margin-left: 20px; color: #92400e;">
+        <li>Insufficient funds in your account</li>
+        <li>Expired credit card</li>
+        <li>Incorrect billing information</li>
+        <li>Bank security restrictions</li>
+    </ul>
+</div>
+
+<div class="message">
+    To avoid any interruption to your service, please update your payment method as soon as possible.
+</div>
+
+<div style="text-align: center; margin: 30px 0;">
+    <a href="{{ billing_url }}" class="cta-button">Update Payment Method</a>
+</div>
+
+<div class="message">
+    <strong>What happens next?</strong>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li>We'll retry your payment in 3 days</li>
+        <li>Your service will continue until {{ retry_date }}</li>
+        <li>If payment fails again, your subscription will be paused</li>
+    </ul>
+</div>
+
+<div class="divider"></div>
+
+<div class="message">
+    <strong>Need help?</strong> If you're having trouble with your payment, please contact our support team. We're here to help!
+</div>
+{% endblock %} 

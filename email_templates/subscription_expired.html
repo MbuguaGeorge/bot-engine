@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="greeting">Your subscription has expired</div>
+
+<div class="message">
+    Hi {{ user_name }}, we noticed that your {{ plan_name }} subscription has expired on {{ expiry_date }}.
+</div>
+
+<div class="warning-box">
+    <h3 style="margin-bottom: 15px; color: #92400e;">What happens now?</h3>
+    <ul style="margin-left: 20px; color: #92400e;">
+        <li>Your bots will be paused and won't respond to messages</li>
+        <li>You can still access your account and view your data</li>
+        <li>All your flows and conversations are safely stored</li>
+    </ul>
+</div>
+
+<div class="message">
+    Don't let your WhatsApp automation stop working! Renew your subscription to continue providing excellent customer service.
+</div>
+
+<div style="text-align: center; margin: 30px 0;">
+    <a href="{{ billing_url }}" class="cta-button">Renew Subscription</a>
+</div>
+
+<div class="message">
+    <strong>Why renew?</strong>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li>Keep your bots running 24/7</li>
+        <li>Continue engaging with customers</li>
+        <li>Access to all premium features</li>
+        <li>Priority support</li>
+    </ul>
+</div>
+
+<div class="divider"></div>
+
+<div class="message">
+    If you have any questions about your subscription or need help with billing, please don't hesitate to contact our support team.
+</div>
+{% endblock %} 

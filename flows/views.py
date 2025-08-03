@@ -49,6 +49,9 @@ class FlowListCreateView(APIView):
     
     def post(self, request, bot_id):
         """Create a new flow for a specific bot"""
+        from bots.models import Bot
+        if not Bot.can_user_create_or_edit(request.user):
+            return Response({'error': 'Your subscription has expired. Please subscribe to create bot flows.'}, status=403)
         bot = get_object_or_404(Bot, id=bot_id, user=request.user)
         serializer = FlowSerializer(data=request.data, context={'bot': bot})
         if serializer.is_valid():
@@ -74,6 +77,9 @@ class FlowDetailView(APIView):
     
     def patch(self, request, pk):
         """Update a flow partially"""
+        from bots.models import Bot
+        if not Bot.can_user_create_or_edit(request.user):
+            return Response({'error': 'Your subscription has expired. Please subscribe to edit bot flows.'}, status=403)
         flow = self.get_object(pk, request.user)
         serializer = FlowSerializer(flow, data=request.data, partial=True)
         if serializer.is_valid():
@@ -83,6 +89,9 @@ class FlowDetailView(APIView):
     
     def delete(self, request, pk):
         """Delete a flow"""
+        from bots.models import Bot
+        if not Bot.can_user_create_or_edit(request.user):
+            return Response({'error': 'Your subscription has expired. Please subscribe to edit bot flows.'}, status=403)
         flow = self.get_object(pk, request.user)
         flow.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
