@@ -68,7 +68,7 @@ class Subscription(models.Model):
         ('incomplete_expired', 'Incomplete Expired'),
     ]
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='subscriptions')
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='subscriptions')
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='subscriptions', null=True, blank=True)
     stripe_subscription_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     stripe_customer_id = models.CharField(max_length=100, null=True, blank=True)
@@ -85,23 +85,19 @@ class Subscription(models.Model):
     is_trial_user = models.BooleanField(default=False)
     trial_credits_allocated = models.BooleanField(default=False)
 
-    def __str__(self):
-        plan_name = self.plan.name if self.plan else "Trial Period"
-        return f"{self.user.email} - {plan_name} ({self.status})"
-
     @property
     def is_active(self):
         return self.status in ['trialing', 'active']
 
     @property
     def is_trialing(self):
-        return self.status == 'trialing'
+        return self.status == 'trialing' and self.trial_start is not None and self.trial_end is not None
 
     @property
     def days_until_expiry(self):
-        if self.current_period_end:
-            delta = self.current_period_end - timezone.now()
-            return max(0, delta.days)
+        """Calculate days until subscription expires"""
+        if self.status in ['trialing', 'active']:
+            return (self.current_period_end - timezone.now()).days
         return 0
     
     @property
@@ -110,6 +106,37 @@ class Subscription(models.Model):
         if self.trial_end:
             return timezone.now() > self.trial_end
         return False
+
+    def reset_trial_credits(self):
+        """Reset trial credits when trial expires"""
+        if self.is_trial_user and self.trial_credits_allocated:
+            self.is_trial_user = False
+            self.trial_credits_allocated = False
+            self.save()
+            
+            # Reset credit balance
+            if hasattr(self.user, 'credit_balance'):
+                self.user.credit_balance.credits_remaining = 0
+                self.user.credit_balance.credits_used_this_period = 0
+                self.user.credit_balance.is_trial_user = False
+                self.user.credit_balance.trial_credits_allocated = False
+                self.user.credit_balance.save()
+
+    def convert_to_paid_subscription(self, plan):
+        """Convert trial subscription to paid subscription"""
+        self.plan = plan
+        self.status = 'active'
+        self.trial_start = None
+        self.trial_end = None
+        self.is_trial_user = False
+        self.trial_credits_allocated = False
+        self.save()
+        
+        # Update credit balance
+        if hasattr(self.user, 'credit_balance'):
+            self.user.credit_balance.is_trial_user = False
+            self.user.credit_balance.trial_credits_allocated = False
+            self.user.credit_balance.save()
 
 class PaymentMethod(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payment_methods')

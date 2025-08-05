@@ -17,22 +17,43 @@
     </ul>
 </div>
 
-<div class="message">
-    Your subscription is now active and all your WhatsApp automation features are ready to use. Keep building amazing customer experiences!
+<div style="text-align: center; margin: 20px 0;">
+    {% if hosted_invoice_url %}
+    <a href="{{ hosted_invoice_url }}" target="_blank" class="cta-button" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 10px;">
+        📄 Download Invoice
+    </a>
+    {% endif %}
 </div>
 
-<div style="text-align: center; margin: 30px 0;">
-    <a href="{{ dashboard_url }}" class="cta-button">Continue Building</a>
+<div class="message">
+    Your subscription is now active and all your WhatsApp automation features are ready to use. Keep building amazing customer experiences!
 </div>
 
 <div class="message">
     <strong>What's included in your {{ plan_name }} plan:</strong>
     <ul style="margin-left: 20px; margin-top: 10px;">
-        <li>Unlimited bots and flows</li>
-        <li>Advanced AI features</li>
-        <li>Priority customer support</li>
-        <li>Advanced analytics and reporting</li>
-        <li>Custom integrations</li>
+        {% if plan_name == 'Basic' %}
+        <li>1000 credits per month</li>
+        <li>Advanced AI integration</li>
+        <li>File & GSheet/Docs uploads</li>
+        <li>Real-time inbox</li>
+        <li>Handoff/takeover chat</li>
+        <li>Advanced analytics</li>
+        {% elif plan_name == 'Pro' %}
+        <li>6000 credits per month</li>
+        <li>Advanced AI integration</li>
+        <li>File & GSheet/Docs uploads</li>
+        <li>Real-time inbox</li>
+        <li>Handoff/takeover chat</li>
+        <li>Advanced analytics</li>
+        {% elif plan_name == 'Enterprise' %}
+        <li>8500 credits per month</li>
+        <li>Advanced AI integration</li>
+        <li>File & GSheet/Docs uploads</li>
+        <li>Real-time inbox</li>
+        <li>Handoff/takeover chat</li>
+        <li>Advanced analytics</li>
+        {% endif %}
     </ul>
 </div>
 

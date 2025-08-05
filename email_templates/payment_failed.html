@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="greeting">Payment failed</div>
+<div class="greeting">We're having issues processing your payment</div>
 
 <div class="message">
     Hi {{ user_name }}, we were unable to process your payment for your {{ plan_name }} subscription.
@@ -29,7 +29,7 @@
 <div class="message">
     <strong>What happens next?</strong>
     <ul style="margin-left: 20px; margin-top: 10px;">
-        <li>We'll retry your payment in 3 days</li>
+        <li>We'll retry your payment in 2 days</li>
         <li>Your service will continue until {{ retry_date }}</li>
         <li>If payment fails again, your subscription will be paused</li>
     </ul>

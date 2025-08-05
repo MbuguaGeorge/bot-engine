@@ -43,7 +43,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         
         # If plan is null (trial subscription), provide a default trial plan structure
-        if data['plan'] is None:
+        if data['plan'] is None and instance.is_trialing:
             data['plan'] = {
                 'id': None,
                 'name': 'Trial Period',
@@ -52,7 +52,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
                 'price': 0,
                 'currency': 'usd',
                 'interval': 'month',
-                'trial_days': 7,
+                'trial_days': 14,
                 'features': {
                     'bots_limit': 3,
                     'messages_per_month': 1000,
@@ -67,7 +67,8 @@ class SubscriptionSerializer(serializers.ModelSerializer):
                     'api_access': False,
                     'priority_support': False
                 },
-                'is_active': True
+                'is_active': True,
+                'credits_per_month': 500
             }
         
         return data

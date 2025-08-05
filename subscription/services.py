@@ -5,7 +5,7 @@ from datetime import timedelta
 import logging
 from django.db import models
 from datetime import datetime, timezone as dt_timezone
-from .models import Invoice
+from .models import Invoice, Subscription
 
 logger = logging.getLogger(__name__)
 
@@ -324,19 +324,34 @@ class CreditService:
     @staticmethod
     def allocate_trial_credits(user):
         """Allocate trial credits for new users"""
-        balance = CreditService.get_or_create_credit_balance(user)
-        
-        if not balance.trial_credits_allocated:
-            balance.credits_remaining = 500  # Trial credit limit
-            balance.credits_used_this_period = 0
-            balance.is_trial_user = True
-            balance.trial_credits_allocated = True
-            balance.credits_reset_date = timezone.now() + timedelta(days=14)  # 14-day trial
-            balance.save()
+        try:
+            # Get or create credit balance
+            credit_balance, created = UserCreditBalance.objects.get_or_create(
+                user=user,
+                defaults={
+                    'credits_remaining': 500,  # Trial credits
+                    'credits_used_this_period': 0,
+                    'credits_reset_date': timezone.now() + timedelta(days=14),  # 14-day trial
+                    'is_trial_user': True,
+                    'trial_credits_allocated': True
+                }
+            )
             
-            logger.info(f"Trial credits allocated for user {user.email}: 500 credits")
-        
-        return balance
+            if not created:
+                # Update existing credit balance for trial
+                credit_balance.credits_remaining = 500
+                credit_balance.credits_used_this_period = 0
+                credit_balance.credits_reset_date = timezone.now() + timedelta(days=14)
+                credit_balance.is_trial_user = True
+                credit_balance.trial_credits_allocated = True
+                credit_balance.save()
+            
+            logger.info(f"Allocated 500 trial credits for user {user.email}")
+            return credit_balance
+            
+        except Exception as e:
+            logger.error(f"Error allocating trial credits for user {user.email}: {e}")
+            raise
     
     @staticmethod
     def check_trial_expiry(user):
@@ -528,63 +543,121 @@ class CreditService:
     
     @staticmethod
     def allocate_credits_for_new_subscription(user, subscription):
-        """Allocate credits immediately when subscription is created"""
-        balance = CreditService.get_or_create_credit_balance(user)
-        
-        # Get credits from subscription plan
-        if subscription.plan:
-            credits_allocation = subscription.plan.credits_per_month
-        else:
-            # Trial period
-            credits_allocation = 100  # Trial credits
-        
-        balance.credits_remaining = credits_allocation
-        balance.credits_used_this_period = 0
-        balance.credits_reset_date = subscription.current_period_end
-        balance.save()
-        
-        logger.info(f"Credits allocated for new subscription - user {user.email}: {credits_allocation} credits")
-        return balance
+        """Allocate credits for a new subscription"""
+        try:
+            # Get or create credit balance
+            credit_balance, created = UserCreditBalance.objects.get_or_create(
+                user=user,
+                defaults={
+                    'credits_remaining': 0,
+                    'credits_used_this_period': 0,
+                    'credits_reset_date': subscription.current_period_end,
+                    'is_trial_user': False,
+                    'trial_credits_allocated': False
+                }
+            )
+            
+            # For trial-to-paid conversion, give fresh credits
+            if subscription.plan:
+                credits_to_allocate = subscription.plan.credits_per_month
+                credit_balance.credits_remaining = credits_to_allocate
+                credit_balance.credits_used_this_period = 0
+                credit_balance.credits_reset_date = subscription.current_period_end
+                credit_balance.is_trial_user = False
+                credit_balance.trial_credits_allocated = False
+                credit_balance.save()
+                
+                logger.info(f"Allocated {credits_to_allocate} credits for user {user.email} on plan {subscription.plan.name}")
+            else:
+                logger.warning(f"No plan found for subscription {subscription.id}")
+                
+        except Exception as e:
+            logger.error(f"Error allocating credits for user {user.email}: {e}")
+            raise
     
     @staticmethod
-    def prorate_credits_for_upgrade(user, old_subscription, new_plan):
+    def prorate_credits_for_upgrade(user, subscription, new_plan):
         """Prorate credits when upgrading/downgrading subscription"""
-        balance = CreditService.get_or_create_credit_balance(user)
-        
-        # If user was in trial, no proration - start fresh
-        if balance.is_trial_user:
-            # Reset trial status and allocate full credits for new plan
-            balance.is_trial_user = False
-            balance.credits_remaining = new_plan.credits_per_month
-            balance.credits_used_this_period = 0
-            balance.credits_reset_date = old_subscription.current_period_end
+        try:
+            # For trial users, give fresh start (no proration)
+            if subscription.is_trial_user:
+                credits_to_allocate = new_plan.credits_per_month
+                balance = CreditService.get_or_create_credit_balance(user)
+                balance.credits_remaining = credits_to_allocate
+                balance.credits_used_this_period = 0
+                balance.credits_reset_date = subscription.current_period_end
+                balance.is_trial_user = False
+                balance.trial_credits_allocated = False
+                balance.save()
+                
+                logger.info(f"Fresh credit allocation for trial user {user.email} upgrading to {new_plan.name}: {credits_to_allocate} credits")
+                return balance
+            
+            # For existing paid subscriptions, calculate proration
+            old_plan = subscription.plan
+            if not old_plan:
+                logger.warning(f"No old plan found for subscription {subscription.id}")
+                return None
+            
+            # Calculate remaining days in current period
+            now = timezone.now()
+            days_remaining = (subscription.current_period_end - now).days
+            total_days = (subscription.current_period_end - subscription.current_period_start).days
+            
+            if days_remaining <= 0:
+                # Period has ended, give full new allocation
+                credits_to_allocate = new_plan.credits_per_month
+            else:
+                # Prorate based on remaining days
+                old_credits_remaining = CreditService.get_or_create_credit_balance(user).credits_remaining
+                prorated_old_credits = (old_credits_remaining * days_remaining) / total_days
+                new_credits_full = new_plan.credits_per_month
+                prorated_new_credits = (new_credits_full * days_remaining) / total_days
+                credits_to_allocate = int(prorated_old_credits + prorated_new_credits)
+            
+            # Update credit balance
+            balance = CreditService.get_or_create_credit_balance(user)
+            balance.credits_remaining = credits_to_allocate
+            balance.credits_reset_date = subscription.current_period_end
             balance.save()
             
-            logger.info(f"Trial user upgraded - fresh start with {new_plan.credits_per_month} credits for user {user.email}")
+            logger.info(f"Prorated credits for user {user.email} upgrading from {old_plan.name} to {new_plan.name}: {credits_to_allocate} credits")
             return balance
-        
-        # Calculate remaining time in current billing cycle
-        now = timezone.now()
-        time_remaining = old_subscription.current_period_end - now
-        total_period = old_subscription.current_period_end - old_subscription.current_period_start
-        remaining_ratio = max(0, time_remaining.total_seconds() / total_period.total_seconds())
-        
-        # Calculate prorated credits for new plan
-        new_plan_credits = new_plan.credits_per_month
-        prorated_new_credits = int(new_plan_credits * remaining_ratio)
-        
-        # Calculate prorated credits for old plan
-        old_plan_credits = old_subscription.plan.credits_per_month if old_subscription.plan else 100
-        prorated_old_credits = int(old_plan_credits * remaining_ratio)
-        
-        # Calculate credit difference
-        credit_difference = prorated_new_credits - prorated_old_credits
-        
-        # Add the difference to current balance
-        if credit_difference != 0:
-            balance.credits_remaining = max(0, balance.credits_remaining + credit_difference)
-            balance.save()
             
-            logger.info(f"Credits prorated for upgrade - user {user.email}: {credit_difference} credits added (new: {prorated_new_credits}, old: {prorated_old_credits})")
-        
-        return balance 
+        except Exception as e:
+            logger.error(f"Error prorating credits for user {user.email}: {e}")
+            raise 
+
+    @staticmethod
+    def allocate_credits_for_plan_change(user, new_plan, old_plan=None):
+        """Allocate full credits for plan change (no time-based proration)"""
+        try:
+            # Get or create credit balance
+            balance = CreditService.get_or_create_credit_balance(user)
+            
+            # Determine if this is an upgrade or downgrade
+            is_downgrade = False
+            if old_plan:
+                is_downgrade = new_plan.price < old_plan.price
+            
+            if is_downgrade:
+                # For downgrades, don't change credits immediately
+                # Credits will be adjusted at the next billing cycle
+                logger.info(f"Downgrade detected for user {user.email} from {old_plan.name} to {new_plan.name}. Credits will be adjusted at next billing cycle.")
+                return balance
+            else:
+                # For upgrades, allocate full credits immediately
+                credits_to_allocate = new_plan.credits_per_month
+                balance.credits_remaining = credits_to_allocate
+                balance.credits_used_this_period = 0
+                balance.credits_reset_date = timezone.now() + timedelta(days=30)  # Set to next billing cycle
+                balance.is_trial_user = False
+                balance.trial_credits_allocated = False
+                balance.save()
+                
+                logger.info(f"Allocated {credits_to_allocate} credits for user {user.email} upgrading to {new_plan.name}")
+                return balance
+            
+        except Exception as e:
+            logger.error(f"Error allocating credits for plan change for user {user.email}: {e}")
+            raise 

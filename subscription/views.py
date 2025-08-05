@@ -12,6 +12,7 @@ import stripe
 import json
 from datetime import datetime, timedelta, timezone as dt_timezone
 import logging
+import traceback
 
 from .models import Subscription, SubscriptionPlan, PaymentMethod, Invoice, WebhookEvent, AIModel, UserCreditBalance, CreditUsageLog
 from .serializers import (
@@ -28,6 +29,9 @@ from email_templates.email_service import EmailService
 logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+# Get the User model
+User = get_user_model()
 
 def is_event_processed(event_id):
     """Check if a webhook event has already been processed"""
@@ -58,8 +62,24 @@ class CurrentSubscriptionView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        subscription = Subscription.objects.filter(user=request.user).first()
+        # Get the most recent active subscription for the user
+        subscription = Subscription.objects.filter(
+            user=request.user,
+            status__in=['trialing', 'active']
+        ).order_by('-created_at').first()
+        
         if subscription:
+            # If this is a paid subscription, ensure it has the correct billing period
+            if subscription.plan and not subscription.is_trialing:
+                # Sync with Stripe to ensure we have the latest data
+                try:
+                    if subscription.stripe_subscription_id and not subscription.stripe_subscription_id.startswith('trial_'):
+                        StripeService.sync_subscription_from_stripe(subscription.stripe_subscription_id)
+                        subscription.refresh_from_db()
+                        logger.info(f"  - Synced from Stripe, new current_period_end: {subscription.current_period_end}")
+                except Exception as e:
+                    logger.error(f"Error syncing subscription from Stripe: {e}")
+            
             serializer = SubscriptionSerializer(subscription)
             return Response(serializer.data)
         return Response({'message': 'No active subscription'}, status=404)
@@ -79,17 +99,29 @@ class CreateSubscriptionView(APIView):
                     status__in=['trialing', 'active']
                 ).first()
                 
-                if existing_subscription:
+                # Allow trial users to create new subscriptions
+                if existing_subscription and not (existing_subscription.stripe_subscription_id and existing_subscription.stripe_subscription_id.startswith('trial_')):
                     return Response(
                         {'error': 'You already have an active subscription'},
                         status=400
                     )
                 
+                # Check if this is a trial user
+                is_trial_user = existing_subscription and existing_subscription.stripe_subscription_id and existing_subscription.stripe_subscription_id.startswith('trial_')
+                
                 # For new subscriptions without payment method, create checkout session
                 if not serializer.validated_data.get('payment_method_id'):
                     try:
-                        # Create Stripe checkout session
-                        customer = StripeService.get_or_create_customer(request.user)
+                        # For trial users, create a new Stripe customer instead of using the fake one
+                        if is_trial_user:
+                            # Create a new Stripe customer for trial users
+                            customer = StripeService.create_customer(request.user)
+                        else:
+                            # Use existing customer for non-trial users
+                            customer = StripeService.get_or_create_customer(request.user)
+                        
+                        # Set billing period based on plan (30 days for paid plans, 14 for trial)
+                        billing_period = 30 if not is_trial_user else 14
                         
                         checkout_session = stripe.checkout.Session.create(
                             customer=customer.id,
@@ -103,7 +135,8 @@ class CreateSubscriptionView(APIView):
                             cancel_url=f"{settings.FRONTEND_URL}/subscription/error?error=canceled",
                             metadata={
                                 'user_id': request.user.id,
-                                'plan_id': plan.id
+                                'plan_id': plan.id,
+                                'is_trial_upgrade': 'true' if is_trial_user else 'false'
                             }
                         )
                         
@@ -122,7 +155,13 @@ class CreateSubscriptionView(APIView):
                 payment_method_id = serializer.validated_data['payment_method_id']
                 
                 try:
-                    customer = StripeService.get_or_create_customer(request.user)
+                    # For trial users, create a new Stripe customer instead of using the fake one
+                    if is_trial_user:
+                        # Create a new Stripe customer for trial users
+                        customer = StripeService.create_customer(request.user)
+                    else:
+                        # Use existing customer for non-trial users
+                        customer = StripeService.get_or_create_customer(request.user)
                     
                     # Attach payment method to customer
                     stripe.PaymentMethod.attach(
@@ -139,29 +178,21 @@ class CreateSubscriptionView(APIView):
                     )
                     
                     # Create subscription
-                    try:
-                        subscription = StripeService.create_subscription(
-                            request.user,
-                            plan,
-                            payment_method_id,
-                            serializer.validated_data.get('trial_from_plan', True)
-                        )
-                        
-                        # Allocate credits for new subscription
-                        CreditService.allocate_credits_for_new_subscription(request.user, subscription)
-                        
-                        serializer = SubscriptionSerializer(subscription)
-                        return Response(serializer.data, status=201)
-                        
-                    except Exception as e:
-                        logger.error(f"Error creating subscription: {e}")
-                        return Response(
-                            {'error': 'Failed to create subscription'},
-                            status=500
-                        )
+                    subscription = StripeService.create_subscription(
+                        request.user,
+                        plan,
+                        payment_method_id,
+                        serializer.validated_data.get('trial_from_plan', True)
+                    )
+                    
+                    # Allocate credits for new subscription
+                    CreditService.allocate_credits_for_new_subscription(request.user, subscription)
+                    
+                    serializer = SubscriptionSerializer(subscription)
+                    return Response(serializer.data, status=201)
                     
                 except Exception as e:
-                    logger.error(f"Error in subscription creation: {e}")
+                    logger.error(f"Error creating subscription: {e}")
                     return Response(
                         {'error': 'Failed to create subscription'},
                         status=500
@@ -185,7 +216,7 @@ class CancelSubscriptionView(APIView):
                 
                 # Cancel subscription in Stripe
                 StripeService.cancel_subscription(
-                    subscription.stripe_subscription_id,
+                    subscription,
                     cancel_at_period_end=serializer.validated_data['cancel_at_period_end']
                 )
                 
@@ -222,39 +253,43 @@ class CreatePaymentMethodView(APIView):
             payment_method_id = request.data.get('payment_method_id')
             if not payment_method_id:
                 return Response({'error': 'Payment method ID is required'}, status=400)
-            
+        
+            try:
                 customer = StripeService.get_or_create_customer(request.user)
-                
-                # Attach payment method to customer
-                stripe.PaymentMethod.attach(
-                    payment_method_id,
-                    customer=customer.id
+            except Exception as e:
+                logger.error(f"Error getting or creating customer: {e}")
+                return Response({'error': 'Failed to get or create customer'}, status=500)
+            
+            # Attach payment method to customer
+            stripe.PaymentMethod.attach(
+                payment_method_id,
+                customer=customer.id
+            )
+            
+            # Set as default if no default exists
+            existing_default = PaymentMethod.objects.filter(user=request.user, is_default=True).first()
+            is_default = not existing_default
+            
+            if is_default:
+                stripe.Customer.modify(
+                    customer.id,
+                    invoice_settings={'default_payment_method': payment_method_id}
                 )
-                
-                # Set as default if no default exists
-                existing_default = PaymentMethod.objects.filter(user=request.user, is_default=True).first()
-                is_default = not existing_default
-                
-                if is_default:
-                    stripe.Customer.modify(
-                        customer.id,
-                        invoice_settings={'default_payment_method': payment_method_id}
-                    )
-                
-                # Save payment method
-                payment_method_data = stripe.PaymentMethod.retrieve(payment_method_id)
-                payment_method = PaymentMethod.objects.create(
-                    user=request.user,
-                    stripe_payment_method_id=payment_method_id,
-                    card_brand=payment_method_data.card.brand,
-                    card_last4=payment_method_data.card.last4,
-                    card_exp_month=payment_method_data.card.exp_month,
-                    card_exp_year=payment_method_data.card.exp_year,
-                    is_default=is_default
-                )
-                
-                serializer = PaymentMethodSerializer(payment_method)
-                return Response(serializer.data, status=201)
+            
+            # Save payment method
+            payment_method_data = stripe.PaymentMethod.retrieve(payment_method_id)
+            payment_method = PaymentMethod.objects.create(
+                user=request.user,
+                stripe_payment_method_id=payment_method_id,
+                card_brand=payment_method_data.card.brand,
+                card_last4=payment_method_data.card.last4,
+                card_exp_month=payment_method_data.card.exp_month,
+                card_exp_year=payment_method_data.card.exp_year,
+                is_default=is_default
+            )
+            
+            serializer = PaymentMethodSerializer(payment_method)
+            return Response(serializer.data, status=201)
         except Exception as e:
             logger.error(f"Error creating payment method: {e}")
             return Response({'error': 'Failed to create payment method'}, status=500)
@@ -310,36 +345,32 @@ class UpgradeSubscriptionView(APIView):
     def post(self, request):
         try:
             new_plan_id = request.data.get('plan_id')
+            payment_method_id = request.data.get('payment_method_id')
             if not new_plan_id:
                 return Response({'error': 'Plan ID is required'}, status=400)
             
             new_plan = get_object_or_404(SubscriptionPlan, id=new_plan_id)
-            current_subscription = Subscription.objects.get(user=request.user, status__in=['trialing', 'active'])
             
-            # Store old plan for credit proration
+            # Get current subscription to determine if it's an upgrade or downgrade
+            current_subscription = Subscription.objects.filter(
+                user=request.user,
+                status__in=['trialing', 'active']
+            ).order_by('-created_at').first()
+
+            if not current_subscription:
+                return Response({'error': 'No active subscription found to upgrade'}, status=404)
+            
             old_plan = current_subscription.plan
             
-            # Update subscription in Stripe
-            stripe.Subscription.modify(
-                current_subscription.stripe_subscription_id,
-                items=[{
-                    'id': stripe.Subscription.retrieve(current_subscription.stripe_subscription_id)['items']['data'][0]['id'],
-                    'price': new_plan.stripe_price_id,
-                }],
-                proration_behavior='create_prorations'
-            )
+            # Use the StripeService to handle the upgrade/downgrade
+            subscription = StripeService.upgrade_subscription(request.user, new_plan=new_plan, payment_method_id=payment_method_id)
             
-            # Update local subscription
-            current_subscription.plan = new_plan
-            current_subscription.save()
+            # Handle credit allocation based on upgrade/downgrade
+            CreditService.allocate_credits_for_plan_change(request.user, new_plan, old_plan)
             
-            # Prorate credits for the upgrade/downgrade
-            CreditService.prorate_credits_for_upgrade(request.user, current_subscription, new_plan)
-            
-            serializer = SubscriptionSerializer(current_subscription)
+            serializer = SubscriptionSerializer(subscription)
             return Response(serializer.data)
-        except Subscription.DoesNotExist:
-            return Response({'error': 'No active subscription found'}, status=404)
+                
         except Exception as e:
             logger.error(f"Error upgrading subscription: {e}")
             return Response({'error': 'Failed to upgrade subscription'}, status=500)
@@ -398,13 +429,16 @@ class StripeWebhookView(APIView):
     def handle_subscription_created(self, subscription_data):
         """Handle subscription.created webhook"""
         try:
+            # Check if subscription already exists
+            existing_subscription = Subscription.objects.filter(stripe_subscription_id=subscription_data['id']).first()
+            if existing_subscription:
+                logger.info(f"Subscription {subscription_data['id']} already exists")
+                return
+            
             user_id = subscription_data.get('metadata', {}).get('user_id')
             if not user_id:
                 logger.error("No user_id in subscription metadata")
                 return
-            
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
             
             try:
                 user = User.objects.get(id=user_id)
@@ -430,18 +464,27 @@ class StripeWebhookView(APIView):
                     logger.error(f"Plan with price ID {price_id} not found")
             
             # Create subscription record
-            subscription = Subscription.objects.create(
-                user=user,
-                plan=plan,
-                stripe_subscription_id=subscription_data['id'],
-                stripe_customer_id=subscription_data['customer'],
-                status=subscription_data['status'],
-                current_period_start=datetime.fromtimestamp(subscription_data['current_period_start'], tz=dt_timezone.utc),
-                current_period_end=datetime.fromtimestamp(subscription_data['current_period_end'], tz=dt_timezone.utc),
-                trial_start=datetime.fromtimestamp(subscription_data['trial_start'], tz=dt_timezone.utc) if subscription_data.get('trial_start') else None,
-                trial_end=datetime.fromtimestamp(subscription_data['trial_end'], tz=dt_timezone.utc) if subscription_data.get('trial_end') else None
-            )
-            
+            # Check if this is a trial user (has subscription ID that starts with 'trial_')
+            subscription_exists = Subscription.objects.filter(stripe_subscription_id=subscription_data['id']).exists()
+            if subscription_exists:
+                if subscription_data['id'].startswith('trial_'):
+                    # Delete any other trial subscriptions for this user
+                    Subscription.objects.filter(user=user, stripe_subscription_id__startswith='trial_').delete()
+            else:
+                subscription, created = Subscription.objects.update_or_create(
+                    user=user,
+                defaults={
+                    'plan': plan,
+                        'stripe_subscription_id': subscription_data['id'],
+                        'stripe_customer_id': subscription_data['customer'],
+                    'status': subscription_data['status'],
+                        'current_period_start': datetime.fromtimestamp(subscription_data['current_period_start'], tz=dt_timezone.utc),
+                        'current_period_end': datetime.fromtimestamp(subscription_data['current_period_end'], tz=dt_timezone.utc),
+                        'trial_start': datetime.fromtimestamp(subscription_data['trial_start'], tz=dt_timezone.utc) if subscription_data.get('trial_start') else None,
+                        'trial_end': datetime.fromtimestamp(subscription_data['trial_end'], tz=dt_timezone.utc) if subscription_data.get('trial_end') else None
+                        }
+                )
+                
             # Allocate credits for new subscription
             CreditService.allocate_credits_for_new_subscription(user, subscription)
             
@@ -491,34 +534,103 @@ class StripeWebhookView(APIView):
     def handle_payment_succeeded(self, invoice_data):
         """Handle invoice.payment_succeeded webhook"""
         try:
-            subscription = Subscription.objects.get(stripe_subscription_id=invoice_data['subscription'])
+            subscription_id = invoice_data.get('subscription')
+            if not subscription_id:
+                logger.info("No subscription found for invoice")
+                return
             
-            # Create invoice record
-            invoice = Invoice.objects.create(
-                subscription=subscription,
+            # Get subscription from database or create from Stripe
+            try:
+                subscription = Subscription.objects.get(stripe_subscription_id=subscription_id)
+                logger.info(f"Found subscription: {subscription.id} for user: {subscription.user.email}")
+            except Subscription.DoesNotExist:
+                logger.info(f"No subscription found for ID: {subscription_id}")
+                try:
+                    stripe_subscription = stripe.Subscription.retrieve(subscription_id)
+                    customer_id = stripe_subscription.customer
+
+                    try:
+                        customer = stripe.Customer.retrieve(customer_id)
+                        User = get_user_model()
+                        user = User.objects.get(email=customer.email)
+                    except Exception as e:
+                        logger.error(f"Error finding user for customer {customer_id}: {e}")
+                        return
+                    
+                    # Get plan from price ID
+                    plan = None
+                    if stripe_subscription.get('items') and stripe_subscription['items'].get('data'):
+                        price_id = stripe_subscription['items']['data'][0]['price']['id']
+                        try:
+                            plan = SubscriptionPlan.objects.get(stripe_price_id=price_id)
+                        except SubscriptionPlan.DoesNotExist:
+                            print(f"Plan with price {price_id} not found")
+                            return
+                    
+                    # Create subscription from Stripe data
+                    subscription, created = Subscription.objects.get_or_create(
+                        stripe_subscription_id=stripe_subscription.id,
+                        defaults={
+                            'user': user,
+                            'plan': plan,
+                            'stripe_customer_id': customer_id,
+                            'status': stripe_subscription.status,
+                            'current_period_start': datetime.fromtimestamp(stripe_subscription.get('current_period_start'), tz=dt_timezone.utc) if stripe_subscription.get('current_period_start') else timezone.now(),
+                            'current_period_end': datetime.fromtimestamp(stripe_subscription.get('current_period_end'), tz=dt_timezone.utc) if stripe_subscription.get('current_period_end') else timezone.now() + timedelta(days=30),
+                            'trial_start': datetime.fromtimestamp(stripe_subscription.get('trial_start'), tz=dt_timezone.utc) if stripe_subscription.get('trial_start') else None,
+                            'trial_end': datetime.fromtimestamp(stripe_subscription.get('trial_end'), tz=dt_timezone.utc) if stripe_subscription.get('trial_end') else None,
+                        }
+                    )
+                    if created:
+                        logger.info(f"Created subscription {subscription.id} from Stripe data for invoice")
+                    else:
+                        logger.info(f"Subscription {subscription.id} already exists from Stripe data")
+                except Exception as e:
+                    logger.error(f"Error getting subscription from Stripe: {str(e)}")
+                    return
+            
+            # Create or update invoice
+            invoice, created = Invoice.objects.get_or_create(
                 stripe_invoice_id=invoice_data['id'],
-                amount=invoice_data['amount_paid'] / 100,  # Convert from cents
-                currency=invoice_data['currency'],
-                status=invoice_data['status'],
-                invoice_pdf=invoice_data.get('invoice_pdf'),
-                hosted_invoice_url=invoice_data.get('hosted_invoice_url')
+                defaults={
+                    'subscription': subscription,
+                    'amount': (invoice_data.get('amount_paid') or invoice_data.get('amount_due') or 0) / 100,
+                    'currency': invoice_data.get('currency', 'usd'),
+                    'status': invoice_data.get('status', 'paid'),
+                    'invoice_pdf': invoice_data.get('invoice_pdf', ''),
+                    'hosted_invoice_url': invoice_data.get('hosted_invoice_url', ''),
+                }
             )
+            if created:
+                logger.info(f"Created new invoice {invoice.id} for subscription {subscription.id}")
+            else:
+                # Update existing invoice
+                invoice.status = invoice_data.get('status', 'paid')
+                invoice.amount = (invoice_data.get('amount_paid') or invoice_data.get('amount_due') or 0) / 100
+                invoice.save()
+                logger.info(f"Updated existing invoice {invoice.id}")
+            
+            # Sync subscription status
+            StripeService.sync_subscription_from_stripe(subscription_id)
             
             # Send payment success email
-            email_service = EmailService()
-            if EmailService:
-                try:
+            try:
+                email_service = EmailService()
+                if email_service:
                     success = email_service.send_payment_success_email(
                         subscription,
                         invoice.amount,
-                        invoice.stripe_invoice_id
+                        invoice.stripe_invoice_id,
+                        invoice.hosted_invoice_url
                     )
                     if success:
                         logger.info(f"Payment success email sent to {subscription.user.email}")
                     else:
                         logger.error(f"Failed to send payment success email to {subscription.user.email}")
-                except Exception as e:
-                    logger.error(f"Exception sending payment success email to {subscription.user.email}: {str(e)}")
+                else:
+                    logger.error("Email service not available")
+            except Exception as e:
+                logger.error(f"Exception sending payment success email to {subscription.user.email}: {str(e)}")
             
             # Only reset credits if this is a billing cycle renewal, not a new subscription
             if CreditService.is_billing_cycle_renewal(subscription, invoice_data):
@@ -530,7 +642,7 @@ class StripeWebhookView(APIView):
             logger.info(f"Payment succeeded for user {subscription.user.email}")
             
         except Subscription.DoesNotExist:
-            logger.error(f"Subscription {invoice_data['subscription']} not found")
+            logger.error(f"Subscription {invoice_data['subscription']} not found - this may be normal for new subscriptions")
         except Exception as e:
             logger.error(f"Error handling payment.succeeded: {e}")
     
@@ -563,13 +675,11 @@ class StripeWebhookView(APIView):
         try:
             user_id = session_data.get('metadata', {}).get('user_id')
             plan_id = session_data.get('metadata', {}).get('plan_id')
+            is_trial_upgrade = session_data.get('metadata', {}).get('is_trial_upgrade') == 'true'
             
             if not user_id or not plan_id:
                 logger.error("Missing user_id or plan_id in checkout session metadata")
                 return
-            
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
             
             try:
                 user = User.objects.get(id=user_id)
@@ -578,25 +688,62 @@ class StripeWebhookView(APIView):
                 logger.error(f"User or plan not found: {e}")
                 return
             
-            # Create subscription record
-            subscription = Subscription.objects.create(
-                user=user,
-                plan=plan,
-                stripe_subscription_id=session_data['subscription'],
-                stripe_customer_id=session_data['customer'],
-                status='active',
-                current_period_start=datetime.fromtimestamp(session_data['subscription_data']['current_period_start'], tz=dt_timezone.utc),
-                current_period_end=datetime.fromtimestamp(session_data['subscription_data']['current_period_end'], tz=dt_timezone.utc)
-            )
-            
-            # Allocate credits for new subscription
-            CreditService.allocate_credits_for_new_subscription(user, subscription)
-            
-            logger.info(f"Checkout completed for user {user.email}")
+            # Get the subscription from Stripe
+            subscription_id = session_data.get('subscription')
+            if subscription_id:
+                try:
+                    stripe_subscription = stripe.Subscription.retrieve(subscription_id)
+
+                    # Use get_or_create to prevent duplicates
+                    subscription, created = Subscription.objects.get_or_create(
+                        user=user,
+                        defaults={
+                            'stripe_subscription_id': stripe_subscription.id,
+                            'plan': plan,
+                            'stripe_customer_id': stripe_subscription.customer,
+                            'status': stripe_subscription.status,
+                            'current_period_start': datetime.fromtimestamp(stripe_subscription.get('current_period_start'), tz=dt_timezone.utc) if stripe_subscription.get('current_period_start') else timezone.now(),
+                            'current_period_end': datetime.fromtimestamp(stripe_subscription.get('current_period_end'), tz=dt_timezone.utc) if stripe_subscription.get('current_period_end') else timezone.now() + timedelta(days=30),
+                            'trial_start': datetime.fromtimestamp(stripe_subscription.get('trial_start'), tz=dt_timezone.utc) if stripe_subscription.get('trial_start') else None,
+                            'trial_end': datetime.fromtimestamp(stripe_subscription.get('trial_end'), tz=dt_timezone.utc) if stripe_subscription.get('trial_end') else None,
+                        }
+                    )
+
+                    if not created:
+                        # Update existing fields in case they're out of sync
+                        subscription.stripe_subscription_id = stripe_subscription.id
+                        subscription.plan = plan
+                        subscription.stripe_customer_id = stripe_subscription.customer
+                        subscription.status = stripe_subscription.status
+                        subscription.current_period_start = datetime.fromtimestamp(stripe_subscription.get('current_period_start'), tz=dt_timezone.utc) if stripe_subscription.get('current_period_start') else timezone.now()
+                        subscription.current_period_end = datetime.fromtimestamp(stripe_subscription.get('current_period_end'), tz=dt_timezone.utc) if stripe_subscription.get('current_period_end') else timezone.now() + timedelta(days=30)
+                        subscription.trial_start = datetime.fromtimestamp(stripe_subscription.get('trial_start'), tz=dt_timezone.utc) if stripe_subscription.get('trial_start') else None
+                        subscription.trial_end = datetime.fromtimestamp(stripe_subscription.get('trial_end'), tz=dt_timezone.utc) if stripe_subscription.get('trial_end') else None
+                        subscription.save()
+                        logger.info(f"Updated subscription {subscription.id} for user {user.email}")
+                    else:
+                        logger.info(f"Created new subscription {subscription.id} for user {user.email}")
+
+
+                except stripe.error.InvalidRequestError as e:
+                    logger.error(f"Subscription {subscription_id} not found in Stripe: {str(e)}")
+                    return
+                except Exception as e:
+                    logger.error(f"Error retrieving subscription from Stripe: {str(e)}")
+                    traceback.print_exc()
+                    return
+                
+                # Allocate credits for the subscription
+                CreditService.allocate_credits_for_new_subscription(user, subscription)
+                
+                logger.info(f"Updated existing subscription for user {user.email}")
+                return
                 
         except Exception as e:
             logger.error(f"Error handling checkout.session.completed: {e}")
-
+            traceback.print_exc()
+            return
+            
     def handle_invoice_created(self, invoice_data):
         """Handle invoice.created webhook"""
         try:
@@ -626,13 +773,24 @@ class StripeWebhookView(APIView):
             customer_id = payment_method_data['customer']
             payment_method_id = payment_method_data['id']
             
-            # Find user by customer ID
+            # Find user by customer ID through subscription
             user = None
             try:
-                user = User.objects.get(stripe_customer_id=customer_id)
-            except User.DoesNotExist:
-                logger.error(f"User with customer ID {customer_id} not found")
-                return
+                subscription = Subscription.objects.get(stripe_customer_id=customer_id)
+                user = subscription.user
+            except Subscription.DoesNotExist:
+                # If subscription doesn't exist yet, try to find user by email from Stripe customer
+                try:
+                    customer = stripe.Customer.retrieve(customer_id)
+                    if customer.email:
+                        user = User.objects.get(email=customer.email)
+                        logger.info(f"Found user {user.email} by email for customer {customer_id}")
+                    else:
+                        logger.error(f"No email found for customer {customer_id}")
+                        return
+                except (User.DoesNotExist, stripe.error.StripeError) as e:
+                    logger.error(f"Could not find user for customer {customer_id}: {e}")
+                    return
             
             # Save payment method
             payment_method = PaymentMethod.objects.create(
@@ -659,7 +817,7 @@ class BillingPortalView(APIView):
             
             session = stripe.billing_portal.Session.create(
                 customer=customer.id,
-                return_url=f"{settings.FRONTEND_URL}/billing"
+                return_url=f"{settings.FRONTEND_URL or 'http://localhost:3000'}/billing"
             )
             
             return Response({'url': session.url})
@@ -739,9 +897,6 @@ class AdminCreditAdjustmentView(APIView):
         serializer = AdminCreditAdjustmentSerializer(data=request.data)
         if serializer.is_valid():
             try:
-                from django.contrib.auth import get_user_model
-                User = get_user_model()
-                
                 user = User.objects.get(id=serializer.validated_data['user_id'])
                 credits_to_add = serializer.validated_data['credits_to_add']
                 reason = serializer.validated_data.get('reason', 'Admin adjustment')

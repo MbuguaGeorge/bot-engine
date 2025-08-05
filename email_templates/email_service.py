@@ -206,10 +206,10 @@ class EmailService:
             subscription.user.email,
             'payment_failed',
             context,
-            "Payment failed - Action required"
+            "Action required: Your payment failed to process"
         )
     
-    def send_payment_success_email(self, subscription, amount, transaction_id):
+    def send_payment_success_email(self, subscription, amount, transaction_id, hosted_invoice_url=None):
         """Send payment success email"""
         context = {
             'user_name': subscription.user.full_name,
@@ -218,6 +218,7 @@ class EmailService:
             'transaction_id': transaction_id,
             'next_billing_date': subscription.current_period_end.strftime('%B %d, %Y'),
             'dashboard_url': f"{FRONTEND_URL}/dashboard",
+            'hosted_invoice_url': hosted_invoice_url,
         }
         return self.send_template_email(
             subscription.user.email,
