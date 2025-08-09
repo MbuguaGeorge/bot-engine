@@ -118,7 +118,7 @@ class CreateSubscriptionView(APIView):
                             customer = StripeService.create_customer(request.user)
                         else:
                             # Use existing customer for non-trial users
-                            customer = StripeService.get_or_create_customer(request.user)
+                        customer = StripeService.get_or_create_customer(request.user)
                         
                         # Set billing period based on plan (30 days for paid plans, 14 for trial)
                         billing_period = 30 if not is_trial_user else 14
@@ -250,11 +250,11 @@ class CreatePaymentMethodView(APIView):
     
     def post(self, request):
         try:
-            payment_method_id = request.data.get('payment_method_id')
-            if not payment_method_id:
-                return Response({'error': 'Payment method ID is required'}, status=400)
+        payment_method_id = request.data.get('payment_method_id')
+        if not payment_method_id:
+            return Response({'error': 'Payment method ID is required'}, status=400)
         
-            try:
+        try:
                 customer = StripeService.get_or_create_customer(request.user)
             except Exception as e:
                 logger.error(f"Error getting or creating customer: {e}")
@@ -328,8 +328,8 @@ class InvoiceHistoryView(APIView):
     
     def get(self, request):
         try:
-            subscription = Subscription.objects.filter(user=request.user).first()
-            if not subscription:
+        subscription = Subscription.objects.filter(user=request.user).first()
+        if not subscription:
                 return Response({'invoices': []})
         
             invoices = Invoice.objects.filter(subscription=subscription).order_by('-created_at')
@@ -444,7 +444,7 @@ class StripeWebhookView(APIView):
                 user = User.objects.get(id=user_id)
             except User.DoesNotExist:
                 logger.error(f"User {user_id} not found")
-                return
+                    return
             
             # Get plan from metadata or find by price ID
             plan_id = subscription_data.get('metadata', {}).get('plan_id')
@@ -629,7 +629,7 @@ class StripeWebhookView(APIView):
                         logger.error(f"Failed to send payment success email to {subscription.user.email}")
                 else:
                     logger.error("Email service not available")
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Exception sending payment success email to {subscription.user.email}: {str(e)}")
             
             # Only reset credits if this is a billing cycle renewal, not a new subscription
@@ -660,14 +660,14 @@ class StripeWebhookView(APIView):
                         logger.info(f"Payment failed email sent to {subscription.user.email}")
                     else:
                         logger.error(f"Failed to send payment failed email to {subscription.user.email}")
-                except Exception as e:
+                        except Exception as e:
                     logger.error(f"Exception sending payment failed email to {subscription.user.email}: {str(e)}")
             
             logger.info(f"Payment failed for user {subscription.user.email}")
             
         except Subscription.DoesNotExist:
             logger.error(f"Subscription {invoice_data['subscription']} not found")
-        except Exception as e:
+                    except Exception as e:
             logger.error(f"Error handling payment.failed: {e}")
     
     def handle_checkout_completed(self, session_data):
@@ -737,9 +737,9 @@ class StripeWebhookView(APIView):
                 CreditService.allocate_credits_for_new_subscription(user, subscription)
                 
                 logger.info(f"Updated existing subscription for user {user.email}")
-                return
+                    return
                 
-        except Exception as e:
+                except Exception as e:
             logger.error(f"Error handling checkout.session.completed: {e}")
             traceback.print_exc()
             return
@@ -866,7 +866,7 @@ class CreditUsageView(APIView):
                 )
                 return Response(result)
             except ValueError as e:
-                return Response({'error': str(e)}, status=400)
+            return Response({'error': str(e)}, status=400)
             except Exception as e:
                 logger.error(f"Error deducting credits: {e}")
                 return Response({'error': 'Failed to deduct credits'}, status=500)
