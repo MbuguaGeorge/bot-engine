@@ -19,9 +19,9 @@ services:
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
     volumes:
-      - ./staticfiles:/opt/wozza/API/staticfiles
-      - ./media:/opt/wozza/API/media
-      - ./logs:/app/logs
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+      - ./logs:/app/logs/
     depends_on:
       redis:
         condition: service_healthy
@@ -42,7 +42,7 @@ services:
     volumes:
       - ./staticfiles:/app/staticfiles
       - ./media:/app/media
-      - ./logs:/app/logs
+      - ./logs:/app/logs/
     depends_on:
       redis:
         condition: service_healthy
@@ -61,7 +61,7 @@ services:
     volumes:
       - ./staticfiles:/app/staticfiles
       - ./media:/app/media
-      - ./logs:/app/logs
+      - ./logs:/app/logs/
     depends_on:
       redis:
         condition: service_healthy
