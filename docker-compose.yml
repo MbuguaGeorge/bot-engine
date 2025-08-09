@@ -12,9 +12,8 @@ services:
     build:
       context: ./API
       dockerfile: Dockerfile
-    image: flowbotic-api:latest
     env_file:
-      - .env
+      - ./.env
     environment:
       DEBUG: ${DEBUG:-False}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
@@ -31,9 +30,8 @@ services:
     restart: unless-stopped
 
   celery:
-    image: flowbotic-api:latest
     env_file:
-      - .env
+      - ./.env
     environment:
       DEBUG: ${DEBUG:-False}
     command: celery -A API worker -l info
@@ -48,9 +46,8 @@ services:
     restart: unless-stopped
 
   celery_beat:
-    image: flowbotic-api:latest
     env_file:
-      - .env
+      - ./.env
     environment:
       DEBUG: ${DEBUG:-False}
     command: celery -A API beat -l info
