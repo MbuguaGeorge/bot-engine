@@ -10,7 +10,7 @@ services:
 
   api:
     build:
-      context: ./API
+      context: .
       dockerfile: Dockerfile
     env_file:
       - ./.env
@@ -19,9 +19,9 @@ services:
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
     volumes:
-      - ./API/staticfiles:/app/staticfiles
-      - ./API/media:/app/media
-      - ./API/logs:/app/logs
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+      - ./logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
@@ -30,6 +30,9 @@ services:
     restart: unless-stopped
 
   celery:
+    build:
+      context: .
+      dockerfile: Dockerfile
     env_file:
       - ./.env
     environment:
@@ -37,15 +40,18 @@ services:
     command: celery -A API worker -l info
     working_dir: /app
     volumes:
-      - ./API/staticfiles:/app/staticfiles
-      - ./API/media:/app/media
-      - ./API/logs:/app/logs
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+      - ./logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
 
   celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
     env_file:
       - ./.env
     environment:
@@ -53,9 +59,9 @@ services:
     command: celery -A API beat -l info
     working_dir: /app
     volumes:
-      - ./API/staticfiles:/app/staticfiles
-      - ./API/media:/app/media
-      - ./API/logs:/app/logs
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+      - ./logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
