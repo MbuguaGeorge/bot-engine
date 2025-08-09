@@ -1,5 +1,3 @@
-version: "3.12"
-
 services:
   redis:
     image: redis:7-alpine
@@ -16,7 +14,7 @@ services:
       dockerfile: Dockerfile
     image: flowbotic-api:latest
     env_file:
-      - ./API/.env
+      - .env
     environment:
       DEBUG: ${DEBUG:-False}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
@@ -35,7 +33,7 @@ services:
   celery:
     image: flowbotic-api:latest
     env_file:
-      - ./API/.env
+      - .env
     environment:
       DEBUG: ${DEBUG:-False}
     command: celery -A API worker -l info
@@ -52,7 +50,7 @@ services:
   celery_beat:
     image: flowbotic-api:latest
     env_file:
-      - ./API/.env
+      - .env
     environment:
       DEBUG: ${DEBUG:-False}
     command: celery -A API beat -l info
