@@ -36,7 +36,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DEBUG: ${DEBUG:-False}
+      DEBUG: ${DEBUG:-True}
     command: celery -A API worker -l info
     working_dir: /app
     volumes:
