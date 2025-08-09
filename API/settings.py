@@ -116,8 +116,11 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = '/opt/wozza/API/staticfiles/'
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
 
 # Media files that users upload
 MEDIA_URL = '/media/'
