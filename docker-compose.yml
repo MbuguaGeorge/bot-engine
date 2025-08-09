@@ -1,0 +1,67 @@
+version: "3.12"
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./API
+      dockerfile: Dockerfile
+    image: flowbotic-api:latest
+    env_file:
+      - ./API/.env
+    environment:
+      DEBUG: ${DEBUG:-False}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
+    volumes:
+      - ./API/staticfiles:/app/staticfiles
+      - ./API/media:/app/media
+      - ./API/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  celery:
+    image: flowbotic-api:latest
+    env_file:
+      - ./API/.env
+    environment:
+      DEBUG: ${DEBUG:-False}
+    command: celery -A API worker -l info
+    working_dir: /app
+    volumes:
+      - ./API/staticfiles:/app/staticfiles
+      - ./API/media:/app/media
+      - ./API/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery_beat:
+    image: flowbotic-api:latest
+    env_file:
+      - ./API/.env
+    environment:
+      DEBUG: ${DEBUG:-False}
+    command: celery -A API beat -l info
+    working_dir: /app
+    volumes:
+      - ./API/staticfiles:/app/staticfiles
+      - ./API/media:/app/media
+      - ./API/logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped

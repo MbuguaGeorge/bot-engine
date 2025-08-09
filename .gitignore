@@ -12,6 +12,7 @@ logs/
 
 # Environments
 .env
+.env.prod
 .env.*
 venv/
 ENV/
