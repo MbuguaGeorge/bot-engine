@@ -28,25 +28,33 @@
         }
         
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 30px;
-            text-align: center;
+            padding: 10px 0px;
+            align-items: center;
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
         }
         
-        .logo {
-            font-size: 28px;
+        .logo-image {
+            width: 40px;
+            height: 40px;
+        }
+        
+        .logo-text {
+            font-size: 20px;
             font-weight: bold;
-            color: white;
-            margin-bottom: 10px;
+            color: #111;
+            font-family: "Gill Sans", sans-serif;
         }
-        
+
         .header-subtitle {
             color: rgba(255, 255, 255, 0.9);
             font-size: 16px;
         }
         
         .content {
-            padding: 40px 30px;
+            padding: 30px 30px;
         }
         
         .greeting {
@@ -153,8 +161,8 @@
 <body>
     <div class="email-container">
         <div class="header">
-            <div class="logo">Wozza</div>
-            <div class="header-subtitle">AI-Powered WhatsApp Automation</div>
+            <img src="https://wozza.io/favicon.ico" alt="Wozza Logo" class="logo-image">
+            <div class="logo-text">Wozza</div>
         </div>
         
         <div class="content">
@@ -166,7 +174,7 @@
                 © 2025 Wozza. All rights reserved.
             </div>
             <div class="footer-text">
-                This email was sent to {{ recipient_email }}. If you have any questions, please contact our support team.
+                If you have any questions, please contact our support team.
             </div>
             <div class="social-links">
                 <a href="https://wozza.io/unsubscribe" class="social-link">Unsubscribe</a>

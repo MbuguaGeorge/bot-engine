@@ -6,6 +6,7 @@ import logging
 from django.db import models
 from datetime import datetime, timezone as dt_timezone
 from .models import Invoice, Subscription
+from subscription.models import UserCreditBalance
 
 logger = logging.getLogger(__name__)
 
@@ -307,8 +308,6 @@ class CreditService:
     @staticmethod
     def get_or_create_credit_balance(user):
         """Get or create credit balance for user"""
-        from .models import UserCreditBalance
-        
         balance, created = UserCreditBalance.objects.get_or_create(
             user=user,
             defaults={

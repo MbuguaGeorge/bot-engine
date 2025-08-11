@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="greeting">Verify Your Email Address 🔐</div>
+
+<div class="message">
+    Hi {{ user_name }}, welcome to Wozza! To complete your account setup, please enter the verification code below.
+</div>
+
+<div class="highlight-box" style="text-align: center; padding: 30px; background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%); border-radius: 12px; margin: 30px 0;">
+    <h2 style="margin-bottom: 20px; color: #1a202c; font-size: 32px; letter-spacing: 8px; font-family: 'Courier New', monospace;">{{ otp_code }}</h2>
+    <p style="color: #718096; font-size: 14px; margin: 0;">This code will expire in 5 minutes</p>
+</div>
+
+<div class="message">
+    <strong>Important:</strong>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li>Enter this code on the verification page to activate your account</li>
+        <li>If you didn't request this code, please ignore this email</li>
+        <li>For security, this code can only be used once</li>
+    </ul>
+</div>
+
+<div style="color: #ffffff; text-align: center; margin: 30px 0;">
+    <a href="{{ verification_url }}" class="cta-button">Verify Email Address</a>
+</div>
+
+<div class="message">
+    <strong>What happens next?</strong>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li>Your account will be activated immediately</li>
+        <li>You'll be redirected to your dashboard</li>
+        <li>Start building your first WhatsApp automation flow</li>
+        <li>Access all trial features for 14 days</li>
+    </ul>
+</div>
+
+<div class="divider"></div>
+
+<div class="message">
+    <strong>Need help?</strong> If you're having trouble with verification, please contact our support team. We're here to help!
+</div>
+{% endblock %} 
