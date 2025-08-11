@@ -20,9 +20,9 @@ class WebhookEvent(models.Model):
 
 class SubscriptionPlan(models.Model):
     PLAN_TYPES = [
-        ('basic', 'Basic'),
-        ('pro', 'Professional'),
-        ('enterprise', 'Enterprise'),
+        ('starter', 'Starter'),
+        ('growth', 'Growth'),
+        ('scale', 'Scale'),
     ]
     
     name = models.CharField(max_length=100)
