@@ -7,6 +7,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - wozza-network
 
   api:
     build:
@@ -28,6 +30,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     restart: unless-stopped
+    networks:
+      - wozza-network
 
   celery:
     build:
@@ -47,6 +51,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - wozza-network
 
   celery_beat:
     build:
@@ -66,3 +72,9 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - wozza-network
+
+networks:
+  wozza-network:
+    driver: bridge
