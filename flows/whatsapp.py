@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 import requests
 from django.conf import settings
 import logging
+from bots.models import WhatsAppBusinessAccount
 
 logger = logging.getLogger(__name__)
 
@@ -10,9 +11,6 @@ class WhatsAppClient:
     
     BASE_URL = "https://graph.facebook.com/v23.0"
     
-    def __init__(self):
-        self.access_token = settings.WHATSAPP_ACCESS_TOKEN
-        
     def send_message(self, to: str, phone_number_id: str, message: str) -> Dict[str, Any]:
         """
         Send a text message to a WhatsApp user
@@ -24,10 +22,12 @@ class WhatsAppClient:
         Returns:
             API response data
         """
+        access_token = WhatsAppBusinessAccount.objects.get(phone_number_id=phone_number_id).access_token
+
         url = f"{self.BASE_URL}/{phone_number_id}/messages"
         
         headers = {
-            "Authorization": f"Bearer {self.access_token}",
+            "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
         

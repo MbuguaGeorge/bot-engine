@@ -126,7 +126,7 @@ class EmailService:
         except Exception as e:
             logger.error(f"Exception sending OTP email to {user.email}: {str(e)}")
             return False
-
+    
     def send_email(self, to_email, subject, html_content, text_content=None):
         """Send email using Mailgun"""
         try:
