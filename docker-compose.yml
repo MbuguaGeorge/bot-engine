@@ -77,4 +77,5 @@ services:
 
 networks:
   wozza-network:
+    name: wozza-network
     driver: bridge
