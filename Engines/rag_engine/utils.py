@@ -10,6 +10,9 @@ from django.utils import timezone
 import requests
 import json
 from flows.models import GoogleOAuthToken, GoogleUserFile
+import logging
+
+logger = logging.getLogger(__name__)
 
 DOCS_SCOPES = ['https://www.googleapis.com/auth/documents.readonly']
 SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
@@ -44,6 +47,7 @@ def fetch_google_doc_text(doc_id: str, user) -> str:
                 content.append(text)
         return "\n".join(content).strip()
     except Exception as e:
+        logger.error(f"Error fetching Google Doc: {e}")
         return f"[Error fetching Google Doc: {e}]"
     
 
@@ -58,6 +62,7 @@ def fetch_google_sheet_text(sheet_id: str, user, range_str: str = 'Sheet1') -> s
         rows = sheet.get('values', [])
         return "\n".join([" | ".join(row) for row in rows])
     except Exception as e:
+        logger.error(f"Error fetching Google Sheet: {e}")
         return f"[Error fetching Google Sheet: {e}]"
         
 

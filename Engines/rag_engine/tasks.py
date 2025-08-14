@@ -2,15 +2,13 @@ from .utils import fetch_google_sheet_text, fetch_google_doc_text, fetch_pdf_tex
 from pinecone import Pinecone
 from .engine import VectorStoreUtils
 from django.conf import settings
-from celery import shared_task, Celery
-from celery.schedules import crontab
+from celery import shared_task
+from account.models import User
 from flows.models import GoogleDocCache, Flow, UploadedFile
 import hashlib
 import logging
 
 logger = logging.getLogger('celery')
-
-app = Celery('API')
 
 def compute_hash(text):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
@@ -60,9 +58,11 @@ def delete_pdf_from_pinecone(file_id, user_id, bot_id, flow_id, node_id):
         raise e
 
 
-def upsert_gdrive_links_to_pinecone(user, flow_id, link):
+@shared_task
+def upsert_gdrive_links_to_pinecone(user_id, flow_id, link, node_id):
     logger.info(f"Running upsert_gdrive_links_to_pinecone for flow_id={flow_id}, link={link}")
     flow = Flow.objects.get(id=flow_id)
+    user = User.objects.get(id=user_id)
     if 'docs.google.com/document' in link:
         doc_id = link.split('/d/')[1].split('/')[0]
         text = fetch_google_doc_text(doc_id, user)
@@ -80,22 +80,34 @@ def upsert_gdrive_links_to_pinecone(user, flow_id, link):
             api_key=settings.PINECONE_API_KEY,
         )
         metadata = {
-            'user_id': flow.bot.user.id,
-            'bot_id': flow.bot.id,
-            'flow_id': flow.id,
-            'link': link
+            'user_id': str(user_id),
+            'bot_id': str(flow.bot.id),
+            'flow_id': str(flow_id),
+            'node_id': str(node_id),
+            'link': str(link),
         }
-        try:
+
+        try: 
             vector_utils.upsert_documents(text, metadata)
             cache.last_hash = content_hash
             cache.save()
         except Exception as e:
-            logger.error(f"Pinecone upsert error: {e}") 
+            logger.error(f"Pinecone upsert error: {e}")
 
-# Register periodic task
-app.conf.beat_schedule = {
-    'upsert-gdrive-links-every-2-hours': {
-        'task': 'Engines.rag_engine.tasks.upsert_gdrive_links_to_pinecone, Engines.rag_engine.tasks.upsert_pdf_to_pinecone, Engines.rag_engine.tasks.delete_pdf_from_pinecone',
-        'schedule': crontab(hour='*/2'),
-    },
-}
+
+@shared_task
+def delete_gdrive_link_from_pinecone(user_id, flow_id, link, node_id):
+    flow = Flow.objects.get(id=flow_id)
+    filter_metadata = {
+        'user_id': str(user_id),
+        'flow_id': str(flow_id),
+        'bot_id': str(flow.bot.id),
+        'node_id': str(node_id),
+        'link': str(link),
+    }
+    try:
+        index = Pinecone(api_key=settings.PINECONE_API_KEY).Index(settings.PINECONE_INDEX_NAME)
+        index.delete(filter=filter_metadata)
+    except Exception as e:
+        logger.error(f"Pinecone delete error: {e}")
+        raise e

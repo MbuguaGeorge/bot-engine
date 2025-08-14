@@ -4,7 +4,7 @@ from datetime import timedelta
 from django.conf import settings
 from .models import Subscription
 from .services import StripeService
-from email_templates.email_service import email_service
+from email_templates.email_service import EmailService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ def send_subscription_expired_notification(subscription_id):
         subscription = Subscription.objects.get(id=subscription_id)
         
         # Send email using MailerSend
+        email_service = EmailService()
         if email_service:
             try:
                 success = email_service.send_subscription_expired_email(subscription)
@@ -224,12 +225,3 @@ def send_trial_expiry_reminders():
         
     except Exception as e:
         logger.error(f"Error in send_trial_expiry_reminders task: {str(e)}")
-
-# Add to beat schedule
-from celery import Celery
-app = Celery('API')
-
-app.conf.beat_schedule['send-trial-expiry-reminders'] = {
-    'task': 'subscription.tasks.send_trial_expiry_reminders',
-    'schedule': 86400.0,  # every day
-} 

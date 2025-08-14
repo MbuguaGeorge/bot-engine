@@ -1,21 +1,27 @@
 import os
 from celery import Celery
-from django.conf import settings
+from celery.schedules import crontab
 
-# Set the default Django settings module for the 'celery' program.
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'API.settings')
-
 app = Celery('API')
-
-# Using a string here means the worker doesn't have to serialize
-# the configuration object to child processes.
 app.config_from_object('django.conf:settings', namespace='CELERY')
 
-# Load task modules from all registered Django apps.
-app.autodiscover_tasks()
+app.conf.update(
+    broker_url=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+    result_backend=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+    worker_log_level='INFO',
+    worker_log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
 
-# Configure periodic tasks
 app.conf.beat_schedule = {
+    'upsert-gdrive-links-every-2-hours': {
+        'task': 'Engines.rag_engine.tasks.upsert_gdrive_links_to_pinecone',
+        'schedule': crontab(hour='*/2'),
+    },
+    'send-trial-expiry-reminders': {
+        'task': 'subscription.tasks.send_trial_expiry_reminders',
+        'schedule': 86400.0,  # every day
+    },
     'check-expired-subscriptions': {
         'task': 'subscription.tasks.check_expired_subscriptions',
         'schedule': 3600.0,  # Run every hour
@@ -49,3 +55,5 @@ app.conf.beat_schedule = {
 @app.task(bind=True)
 def debug_task(self):
     print(f'Request: {self.request!r}') 
+
+app.autodiscover_tasks()

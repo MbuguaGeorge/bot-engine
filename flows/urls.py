@@ -10,7 +10,7 @@ from .views import (
     GoogleOAuthDeviceCodeView, GoogleOAuthTokenPollView,
     GoogleDocsLinkView, GoogleDocsListView,
     GoogleOAuthURLView, GoogleOAuthCallbackView,
-    GoogleOAuthStatusView, UpsertGDriveLinkView
+    GoogleOAuthStatusView, UpsertGDriveLinkView, DeleteGDriveLinkView
 )
 
 app_name = 'flows'
@@ -31,4 +31,5 @@ urlpatterns = [
     path('google-oauth/callback/', GoogleOAuthCallbackView.as_view(), name='google_oauth_callback'),
     path('google-oauth/status/', GoogleOAuthStatusView.as_view(), name='google_oauth_status'),
     path('upsert-gdrive-link/', UpsertGDriveLinkView.as_view(), name='upsert_gdrive_link'),
-] 
+    path('delete-gdrive-link/', DeleteGDriveLinkView.as_view(), name='delete_gdrive_link'),
+]
