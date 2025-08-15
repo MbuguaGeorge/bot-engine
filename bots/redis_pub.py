@@ -3,7 +3,7 @@ import json
 import redis
 from django.conf import settings
 
-REDIS_URL = getattr(settings, 'REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
+REDIS_URL = getattr(settings, 'REDIS_URL', os.getenv('REDIS_URL'))
 
 _redis_client = None
 

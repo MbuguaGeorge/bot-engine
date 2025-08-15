@@ -256,7 +256,7 @@ class MetaCallbackView(APIView):
                 title='WhatsApp Connected',
                 message=f'WhatsApp was connected to bot "{bot.name}".'
             )
-            return HttpResponseRedirect("http://localhost:8080/dashboard")
+            return HttpResponseRedirect(f"{settings.FRONTEND_URL}/dashboard")
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)

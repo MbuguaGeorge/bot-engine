@@ -285,7 +285,7 @@ def send_whatsapp_message(request):
         resp = client.send_message(phone_number, phone_number_id, message)
         # After sending, publish to Redis for Node.js chat storage
         try:
-            redis_url = getattr(settings, 'REDIS_URL', 'redis://localhost:6379/0')
+            redis_url = getattr(settings, 'REDIS_URL')
             redis_client = redis.Redis.from_url(redis_url)
             msg_data = {
                 "conversation_id": conversation_id,

@@ -194,6 +194,9 @@ SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = 'DENY'
 SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 
+# Allow cross-origin communication for OAuth popups
+SECURE_CROSS_ORIGIN_OPENER_POLICY = 'unsafe-none'
+
 # Session Engine - Use database-backed sessions for better security
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 

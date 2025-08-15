@@ -7,8 +7,8 @@ app = Celery('API')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 
 app.conf.update(
-    broker_url=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
-    result_backend=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+    broker_url=os.getenv('REDIS_URL'),
+    result_backend=os.getenv('REDIS_URL'),
     worker_log_level='INFO',
     worker_log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )

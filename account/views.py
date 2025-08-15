@@ -31,19 +31,19 @@ class SignUpView(APIView):
             # Validate email address BEFORE creating user
             email_service = EmailService()
             try:
-                # Validate email address using Abstract API
+            # Validate email address using Abstract API
                 email_valid = email_service.validate_email_address(test_email)
                 if not email_valid:
                     logger.warning(f"Email validation failed for {test_email} - preventing user creation")
                     return Response({
-                    'error': 'Please enter a valid email address. The email address you provided appears to be invalid or cannot receive emails.'
+                'error': 'Please enter a valid email address. The email address you provided appears to be invalid or cannot receive emails.'
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
                 logger.info(f"Email validation successful for {test_email}, proceeding with user creation")
             except Exception as e:
                 logger.error(f"Exception during email validation for {test_email}: {str(e)}")
                 return Response({
-                'error': 'Unable to validate email address. Please check your email and try again.'
+            'error': 'Unable to validate email address. Please check your email and try again.'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
             # If email validation passes, create the user (inactive by default)
@@ -304,11 +304,22 @@ class LogoutView(APIView):
                 # Clear all session data
                 request.session.flush()
                 
-                return Response({
+                # Create response with cookie clearing
+                response = Response({
                     'message': 'Successfully logged out',
                     'session_cleared': True,
                     'session_key': session_key
                 })
+                
+                # Clear session cookies by setting them to expire in the past
+                response.delete_cookie('wozza_sessionid', domain=None, path='/')
+                response.delete_cookie('wozza_csrftoken', domain=None, path='/')
+                
+                # Also clear any other potential session cookies
+                response.delete_cookie('sessionid', domain=None, path='/')
+                response.delete_cookie('csrftoken', domain=None, path='/')
+                
+                return response
             
             # Handle JWT logout (blacklist the refresh token)
             refresh_token = request.data.get('refresh_token')
@@ -316,19 +327,32 @@ class LogoutView(APIView):
                 try:
                     token = RefreshToken(refresh_token)
                     token.blacklist()
-                    return Response({
+                    
+                    response = Response({
                         'message': 'Successfully logged out',
                         'token_blacklisted': True
                     })
+                    
+                    # Clear any JWT-related cookies if they exist
+                    response.delete_cookie('wozza_sessionid', domain=None, path='/')
+                    response.delete_cookie('wozza_csrftoken', domain=None, path='/')
+                    
+                    return response
                 except Exception as e:
                     return Response({
                         'error': 'Invalid refresh token'
                     }, status=status.HTTP_400_BAD_REQUEST)
             
             # If neither session nor refresh token, just return success
-            return Response({
+            response = Response({
                 'message': 'Successfully logged out'
             })
+            
+            # Still clear any cookies that might exist
+            response.delete_cookie('wozza_sessionid', domain=None, path='/')
+            response.delete_cookie('wozza_csrftoken', domain=None, path='/')
+            
+            return response
             
         except Exception as e:
             return Response({

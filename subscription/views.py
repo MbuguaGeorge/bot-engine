@@ -817,7 +817,7 @@ class BillingPortalView(APIView):
             
             session = stripe.billing_portal.Session.create(
                 customer=customer.id,
-                return_url=f"{settings.FRONTEND_URL or 'http://localhost:3000'}/billing"
+                return_url=f"{settings.FRONTEND_URL}/billing"
             )
             
             return Response({'url': session.url})

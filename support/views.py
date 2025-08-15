@@ -6,6 +6,8 @@ from django.shortcuts import get_object_or_404
 from django.core.exceptions import ObjectDoesNotExist
 import logging
 import json
+import redis
+from django.conf import settings
 from .models import SupportTicket
 from .serializers import (
     SupportTicketSerializer, 
@@ -17,8 +19,7 @@ logger = logging.getLogger(__name__)
 def publish_to_redis(channel, payload):
     """Publish message to Redis for real-time updates"""
     try:
-        import redis
-        r = redis.Redis(host='localhost', port=6379, db=0)
+        r = redis.Redis.from_url(settings.REDIS_URL)
         r.publish(channel, json.dumps(payload))
         logger.info(f"Published to Redis channel {channel}: {payload}")
     except Exception as e:
