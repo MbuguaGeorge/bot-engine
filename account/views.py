@@ -6,6 +6,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model, authenticate, update_session_auth_hash
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from .serializers import UserSerializer
 from bots.services import NotificationService, NOTIFICATION_EVENT_TYPES
 from email_templates.email_service import EmailService
@@ -34,16 +36,16 @@ class SignUpView(APIView):
                 if not email_valid:
                     logger.warning(f"Email validation failed for {test_email} - preventing user creation")
                     return Response({
-                        'error': 'Please enter a valid email address. The email address you provided appears to be invalid or cannot receive emails.'
+                    'error': 'Please enter a valid email address. The email address you provided appears to be invalid or cannot receive emails.'
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
                 logger.info(f"Email validation successful for {test_email}, proceeding with user creation")
             except Exception as e:
                 logger.error(f"Exception during email validation for {test_email}: {str(e)}")
                 return Response({
-                    'error': 'Unable to validate email address. Please check your email and try again.'
+                'error': 'Unable to validate email address. Please check your email and try again.'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+        
             # If email validation passes, create the user (inactive by default)
             user = serializer.save()
             
@@ -117,7 +119,7 @@ class VerifyOTPView(APIView):
             user.is_active = True
             user.email_verified = True
             user.save()
-            
+
             # Start 14-day trial subscription
             from subscription.models import Subscription
             from datetime import timedelta
@@ -133,7 +135,7 @@ class VerifyOTPView(APIView):
                     trial_start=timezone.now(),
                     trial_end=timezone.now() + timedelta(days=14),
                 )
-            
+
             # Send welcome email
             email_service = EmailService()
             try:
@@ -147,7 +149,7 @@ class VerifyOTPView(APIView):
             
             # Generate tokens for immediate login
             refresh = RefreshToken.for_user(user)
-            
+
             return Response({
                 'message': 'Email verified successfully! Welcome to Wozza!',
                 'token': str(refresh.access_token),
@@ -221,6 +223,7 @@ class LoginView(APIView):
     def post(self, request):
         email = request.data.get('email')
         password = request.data.get('password')
+        use_cookies = request.data.get('use_cookies', True)  # Default to cookies
 
         if not email or not password:
             return Response({
@@ -235,13 +238,13 @@ class LoginView(APIView):
                 'error': 'No account found with this email address. Please check your email or sign up for a new account.'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if account is pending deletion
-        if user.is_pending_deletion and user.deletion_requested_at:
-            days_remaining = 60 - (timezone.now() - user.deletion_requested_at).days
-            return Response({
-                'error': f'Your account is scheduled for deletion and will be permanently removed in {max(0, days_remaining)} days.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+            # Check if account is pending deletion
+            if user.is_pending_deletion and user.deletion_requested_at:
+                days_remaining = 60 - (timezone.now() - user.deletion_requested_at).days
+                return Response({
+                    'error': f'Your account is scheduled for deletion and will be permanently removed in {max(0, days_remaining)} days.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
         # Check if email is verified before attempting authentication
         if not user.email_verified:
             return Response({
@@ -251,19 +254,149 @@ class LoginView(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         # Now attempt authentication
-        authenticated_user = authenticate(email=email, password=password)
+        authenticated_user = authenticate(request, email=email, password=password)
 
         if authenticated_user:
-            refresh = RefreshToken.for_user(authenticated_user)
+            if use_cookies:
+                # Use cookie-based session authentication (preferred)
+                from django.contrib.auth import login
+                login(request, authenticated_user)
+                
+                # Set session expiry
+                request.session.set_expiry(3600)  # 1 hour
+                
+                # Store user info in session for quick access
+                request.session['user_id'] = authenticated_user.id
+                request.session['email'] = authenticated_user.email
+                request.session['is_authenticated'] = True
+                
+                return Response({
+                    'user': UserSerializer(authenticated_user).data,
+                    'session_id': request.session.session_key,
+                    'authentication_method': 'session',
+                    'expires_in': 3600
+                })
+            else:
+                # Fallback to JWT tokens
+                refresh = RefreshToken.for_user(authenticated_user)
             return Response({
                 'token': str(refresh.access_token),
                 'refresh': str(refresh),
-                'user': UserSerializer(authenticated_user).data
+                    'user': UserSerializer(authenticated_user).data,
+                    'authentication_method': 'jwt'
             })
         
         return Response({
-            'error': 'The password you entered is incorrect. Please try again.'
+            'error': 'Invalid email or password. Please check your credentials and try again.'
         }, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            # Handle session logout
+            if hasattr(request, 'session') and request.session.session_key:
+                from django.contrib.auth import logout
+                session_key = request.session.session_key
+                logout(request)
+                # Clear all session data
+                request.session.flush()
+                
+                return Response({
+                    'message': 'Successfully logged out',
+                    'session_cleared': True,
+                    'session_key': session_key
+                })
+            
+            # Handle JWT logout (blacklist the refresh token)
+            refresh_token = request.data.get('refresh_token')
+            if refresh_token:
+                try:
+                    token = RefreshToken(refresh_token)
+                    token.blacklist()
+                    return Response({
+                        'message': 'Successfully logged out',
+                        'token_blacklisted': True
+                    })
+                except Exception as e:
+                    return Response({
+                        'error': 'Invalid refresh token'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # If neither session nor refresh token, just return success
+            return Response({
+                'message': 'Successfully logged out'
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': 'Logout failed',
+                'detail': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SessionRefreshView(APIView):
+    """
+    Endpoint to refresh session and extend expiry time.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if hasattr(request, 'session') and request.session.session_key:
+            # Extend session expiry
+            request.session.set_expiry(3600)  # 1 hour from now
+            
+            return Response({
+                'message': 'Session refreshed successfully',
+                'expires_in': 3600,
+                'session_key': request.session.session_key
+            })
+        else:
+            return Response({
+                'error': 'No active session found'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SessionToJWTView(APIView):
+    """
+    Generate a JWT token for session-authenticated users.
+    This allows session users to access Node.js services that require JWT auth.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        
+        # Generate JWT tokens for the authenticated user
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'token': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': UserSerializer(user).data,
+            'message': 'JWT tokens generated for session user'
+        })
+
+
+class SessionStatusView(APIView):
+    """
+    Endpoint to check session status and user authentication.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        session_data = {
+            'authenticated': True,
+            'user': UserSerializer(user).data,
+            'session_key': getattr(request.session, 'session_key', None),
+            'expires_in': request.session.get_expiry_age() if hasattr(request, 'session') else None,
+            'authentication_method': 'session' if hasattr(request, 'session') and request.session.session_key else 'jwt'
+        }
+        
+        return Response(session_data)
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]

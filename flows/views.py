@@ -344,8 +344,7 @@ class GoogleDocsListView(APIView):
 class GoogleOAuthURLView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        # redirect_uri = request.build_absolute_uri('/api/google-oauth/callback/')
-        redirect_uri = 'https://578d0b89e569.ngrok-free.app/api/google-oauth/callback/'
+        redirect_uri = request.build_absolute_uri('/api/google-oauth/callback/')
         params = {
             'client_id': settings.GOOGLE_CLIENT_ID,
             'redirect_uri': redirect_uri,
@@ -373,7 +372,7 @@ class GoogleOAuthCallbackView(APIView):
         if not code or not state:
             return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"Missing code or state"}, "*");window.close();</script>')
         # Exchange code for tokens
-        redirect_uri = 'https://578d0b89e569.ngrok-free.app/api/google-oauth/callback/'
+        redirect_uri = request.build_absolute_uri('/api/google-oauth/callback/')
         data = {
             'code': code,
             'client_id': settings.GOOGLE_CLIENT_ID,
@@ -393,8 +392,10 @@ class GoogleOAuthCallbackView(APIView):
             user = User.objects.get(id=state)
         except User.DoesNotExist:
             return HttpResponse('<script>window.opener.postMessage({type:"google_oauth_error",error:"User not found"}, "*");window.close();</script>')
+        
         expires_in = token_data.get('expires_in', 3600)
         expires_at = timezone.now() + datetime.timedelta(seconds=expires_in)
+        
         GoogleOAuthToken.objects.update_or_create(
             user=user,
             defaults={
@@ -405,19 +406,12 @@ class GoogleOAuthCallbackView(APIView):
                 'token_type': token_data.get('token_type', ''),
             }
         )
+        
+        logger.info(f"✅ Google OAuth token saved successfully for user {user.id} ({user.email})")
 
         response = HttpResponse("""
             <script>
-            try {
-                const channel = new BroadcastChannel("google-oauth");
-                channel.postMessage({type:"google_oauth_success"}); 
-                channel.close();
-            } catch(e) {}
             window.close();
-            setTimeout(function() {
-                window.open("about:blank", "_self");
-                window.close();
-            }, 200);
             </script>
         """)
 
